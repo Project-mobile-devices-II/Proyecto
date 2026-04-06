@@ -1,0 +1,91 @@
+import { StyleSheet } from 'react-native';
+
+export const style_01 = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0f0f0f',
+    padding: 15,
+  },
+  title: {
+    fontSize: 32,
+    color: '#ff3333',
+    textAlign: 'center',
+    marginVertical: 15,
+    fontWeight: 'bold',
+    textShadowColor: '#ff0000',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 5,
+  },
+  subtitle: {
+    fontSize: 18,
+    color: '#aaa',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  predictionContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    gap: 10,
+    marginVertical: 15,
+  },
+  predictionButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    minWidth: 85,
+    alignItems: 'center',
+  },
+  zero: { backgroundColor: '#444' },
+  min: { backgroundColor: '#3366ff' },
+  more: { backgroundColor: '#ffaa00' },
+  max: { backgroundColor: '#ff3333' },
+  selected: {
+    borderWidth: 4,
+    borderColor: '#ffff00',
+  },
+  diceContainer: {
+    backgroundColor: '#1a1a1a',
+    padding: 15,
+    borderRadius: 12,
+    marginVertical: 15,
+  },
+  diceRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  die: {
+    width: 55,
+    height: 55,
+    backgroundColor: '#fff',
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 3,
+    borderColor: '#333',
+  },
+  dieText: {
+    fontSize: 28,
+    fontWeight: 'bold',
+  },
+  sendButton: {
+    backgroundColor: '#ff3333',
+    padding: 18,
+    borderRadius: 12,
+    marginVertical: 15,
+  },
+  logContainer: {
+    backgroundColor: '#000',
+    padding: 12,
+    borderRadius: 8,
+    height: 180,
+    marginTop: 10,
+  },
+  logText: {
+    color: '#0f0',
+    fontFamily: 'monospace',
+    fontSize: 14,
+  },
+});

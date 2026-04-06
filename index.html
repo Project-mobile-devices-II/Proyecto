@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Dado Triple - Prueba WebSocket</title>
+    <script>
+        let ws;
+        const ip = "10.90.41.118";   // ← CAMBIAR IP
+
+        function conectar() {
+            ws = new WebSocket(`ws://${ip}:5000`);
+            
+            ws.onopen = function() {
+                document.getElementById('log').value += "✅ Conectado al servidor Dado Triple\n";
+                ws.send("Hola desde el navegador - Probando conexión");
+            };
+
+            ws.onmessage = function(e) {
+                document.getElementById('log').value += "📨 Servidor: " + e.data + "\n";
+            };
+
+            ws.onerror = function(e) {
+                document.getElementById('log').value += "❌ Error en conexión\n";
+            };
+
+            ws.onclose = function() {
+                document.getElementById('log').value += "🔌 Conexión cerrada\n";
+            };
+        }
+
+        function enviar() {
+            const msg = document.getElementById('mensaje').value;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(msg);
+                document.getElementById('mensaje').value = '';
+            }
+        }
+    </script>
+</head>
+<body onload="conectar()">
+    <h1>Prueba WebSocket - Dado Triple</h1>
+    <textarea id="log" rows="15" cols="80" readonly></textarea><br><br>
+    
+    <input type="text" id="mensaje" placeholder="Escribe un mensaje..." size="50">
+    <button onclick="enviar()">Enviar</button>
+    
+    <p><strong>IP del servidor:</strong> <span id="ip"></span></p>
+</body>
+</html>

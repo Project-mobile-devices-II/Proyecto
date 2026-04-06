@@ -1,0 +1,4 @@
+## Solucion a ip usada en server
+Error: Error: Os { code: 98, kind: AddrInUse, message: "Address already in use" }
+usar ** kill -9 [PID] **
+y usar denuevo "cargo run"
