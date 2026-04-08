@@ -1,270 +1,306 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
-import { style_01 } from '../styles/style_01';
-import { createWs, WS_IP } from '../../App';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { style_01 } from '../styles/style_01';
+import { createWs } from '../../App';
 
 const AccSocket = () => {
+
+  const [screen, setScreen] = useState("loading");
   const [connected, setConnected] = useState(false);
-  const [connecting, setConnecting] = useState(true);
+  const [roomId, setRoomId] = useState('');
+  const [inputRoom, setInputRoom] = useState('');
   const [nick, setNick] = useState('');
-  const [nickEntered, setNickEntered] = useState(false);
-  const [log, setLog] = useState('Conectando al servidor...\n');
+  const [gameState, setGameState] = useState({ phase: 'lobby', players: [] });
 
-  const [prediction, setPrediction] = useState(null);
-  const [whiteDice, setWhiteDice] = useState([1,2,3,4,5,6,1,2,3]);
+  const [whiteDice, setWhiteDice] = useState([]);
   const [selectedDice, setSelectedDice] = useState([]);
-  const [gameState, setGameState] = useState({ phase: 'lobby', round: 1, players: [] });
-  const [myNick, setMyNick] = useState('');   // ← Esta es la clave
-  const myClientIdRef = useRef(null);
+  const [prediction, setPrediction] = useState(null);
 
+  const myClientIdRef = useRef(null);
   const wsRef = useRef(null);
 
-  useEffect(() => {
+  // ================= SAFE SEND =================
+  const safeSend = (data) => {
+    console.log("📤 INTENTANDO ENVIAR:", data);
 
-  const initClientId = async () => {
-    let storedId = await AsyncStorage.getItem('client_id');
-
-    if (!storedId) {
-      storedId = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-      await AsyncStorage.setItem('client_id', storedId);
-      console.log("🆕 Nuevo client_id:", storedId);
-    } else {
-      console.log("♻️ Reutilizando client_id:", storedId);
-    }
-
-    myClientIdRef.current = storedId;
-
-    // 🔥 AQUÍ recién creas conexión
-    const currentWs = createWs();
-    wsRef.current = currentWs;
-
-    currentWs.onopen = () => {
-      setConnected(true);
-      setConnecting(false);
-      setLog(prev => prev + '✅ Conectado al servidor\n');
-    };
-
-    currentWs.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-
-        const players = Array.isArray(data.players) ? data.players : [];
-
-        setGameState({
-          ...data,
-          players,
-          phase: data.phase || 'lobby',
-          round: typeof data.round === 'number' ? data.round : 1,
-          white_dice: Array.isArray(data.white_dice) ? data.white_dice : [],
-        });
-
-        if (Array.isArray(data.white_dice)) {
-          setWhiteDice(data.white_dice);
-        }
-
-        const myCid = myClientIdRef.current;
-        const hasMe = players.some(p => p.client_id === myCid);
-
-        if (hasMe) {
-          setNickEntered(true);
-        }
-
-      } catch (err) {
-        console.log("ERROR WS:", err);
-      }
-    };
-  };
-
-  initClientId();
-
-}, []);
-
-  const sendNick = () => {
-  if (nick.trim() === '') {
-    Alert.alert('Error', 'Ingresa tu nombre');
-    return;
-  }
-
-  const clientId = myClientIdRef.current;
-
-  wsRef.current.send(JSON.stringify({
-    type: 'JOIN',
-    nick: nick,
-    client_id: clientId
-  }));
-
-  setMyNick(nick);
-
-  // 🔥 MOSTRAR LOBBY INMEDIATO
-  setNickEntered(true);
-
-  setLog(prev => prev + `👤 Enviando JOIN: ${nick} (${clientId})\n`);
-};
-
-  const toggleReady = () => {
-    wsRef.current.send(JSON.stringify({ type: 'READY' }));
-    setLog(prev => prev + '✅ Marcado como LISTO\n');
-  };
-
-  const selectPrediction = (pred) => {
-    setPrediction(pred);
-    wsRef.current.send(JSON.stringify({ type: 'PREDICTION', value: pred }));
-  };
-
-  const toggleDie = (index) => {
-    if (selectedDice.includes(index)) {
-      setSelectedDice(selectedDice.filter(i => i !== index));
-    } else if (selectedDice.length < 3) {
-      setSelectedDice([...selectedDice, index]);
-    } else {
-      Alert.alert('Máximo 3 dados');
-    }
-  };
-
-  const sendCombination = () => {
-    if (selectedDice.length !== 3) {
-      Alert.alert('Error', 'Selecciona exactamente 3 dados');
+    if (!wsRef.current) {
+      console.log("❌ WS NULL");
       return;
     }
-    const chosenDice = selectedDice.map(i => whiteDice[i]);
-    wsRef.current.send(JSON.stringify({ type: 'SUBMIT_DICE', dice: chosenDice }));
+
+    console.log("📡 WS STATE:", wsRef.current.readyState);
+
+    if (wsRef.current.readyState !== 1) {
+      console.log("❌ WS NO ABIERTO");
+      Alert.alert("Error", "Conexión cerrada");
+      return;
+    }
+
+    wsRef.current.send(JSON.stringify(data));
+  };
+
+  // ================= INIT =================
+  useEffect(() => {
+
+    const connect = async () => {
+
+      let cid = await AsyncStorage.getItem('client_id');
+
+      if (!cid) {
+        cid = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+        await AsyncStorage.setItem('client_id', cid);
+        console.log("🆕 NUEVO CID:", cid);
+      } else {
+        console.log("♻️ CID EXISTENTE:", cid);
+      }
+
+      myClientIdRef.current = cid;
+
+      const ws = createWs();
+      wsRef.current = ws;
+
+      console.log("🔌 Intentando conectar WS...");
+
+      ws.onopen = () => {
+        console.log("✅ WS CONECTADO");
+        setConnected(true);
+        setScreen("home");
+      };
+
+      ws.onclose = (e) => {
+        console.log("❌ WS CERRADO:", e.code, e.reason);
+        setConnected(false);
+      };
+
+      ws.onerror = (err) => {
+        console.log("💥 WS ERROR:", err.message);
+      };
+
+      ws.onmessage = (e) => {
+        console.log("📩 RECIBIDO:", e.data);
+
+        try {
+          const data = JSON.parse(e.data);
+
+          if (data.type === "ROOM_CREATED") {
+            console.log("🏠 ROOM CREATED:", data.room_id);
+            setRoomId(data.room_id);
+            setScreen("nick");
+            return;
+          }
+
+          if (data.type === "ROOM_JOINED") {
+            console.log("🚪 ROOM JOINED:", data.room_id);
+            setRoomId(data.room_id);
+            setScreen("nick");
+            return;
+          }
+
+          if (data.type === "ERROR") {
+            console.log("⚠️ ERROR SERVER:", data.message);
+            Alert.alert("Error", data.message);
+            return;
+          }
+
+          if (data.players) {
+            console.log("👥 GAME STATE:", data.players.length);
+
+            setGameState(data);
+            setWhiteDice(data.white_dice || []);
+
+            const hasMe = data.players.some(p => p.client_id === myClientIdRef.current);
+
+            if (hasMe) {
+              setScreen(data.phase === "lobby" ? "lobby" : "game");
+            }
+          }
+
+        } catch (err) {
+          console.log("❌ PARSE ERROR:", err);
+        }
+      };
+    };
+
+    connect();
+
+  }, []);
+
+  // ================= ROOM =================
+
+  const createRoom = () => {
+    console.log("🔥 CLICK CREATE ROOM");
+
+    safeSend({
+      type: "CREATE_ROOM",
+      client_id: myClientIdRef.current
+    });
+  };
+
+  const joinRoom = () => {
+    console.log("🔥 CLICK JOIN ROOM");
+
+    if (!inputRoom) return Alert.alert("Error", "Ingresa código");
+
+    safeSend({
+      type: "JOIN_ROOM",
+      room_id: inputRoom,
+      client_id: myClientIdRef.current
+    });
+  };
+
+  // ================= NICK =================
+
+  const sendNick = () => {
+    console.log("🔥 CLICK JOIN GAME");
+
+    if (!nick) return Alert.alert("Error", "Ingresa nombre");
+
+    safeSend({
+      type: "JOIN",
+      nick,
+      client_id: myClientIdRef.current,
+      room_id: roomId
+    });
+  };
+
+  // ================= GAME =================
+
+  const toggleReady = () => {
+    safeSend({
+      type: "READY",
+      room_id: roomId,
+      client_id: myClientIdRef.current
+    });
+  };
+
+  const selectPrediction = (p) => {
+    setPrediction(p);
+
+    safeSend({
+      type: "PREDICTION",
+      value: p,
+      room_id: roomId,
+      client_id: myClientIdRef.current
+    });
+  };
+
+  const toggleDie = (i) => {
+    if (selectedDice.includes(i)) {
+      setSelectedDice(selectedDice.filter(x => x !== i));
+    } else if (selectedDice.length < 3) {
+      setSelectedDice([...selectedDice, i]);
+    }
+  };
+
+  const sendDice = () => {
+    if (selectedDice.length !== 3) return Alert.alert("Selecciona 3");
+
+    const dice = selectedDice.map(i => whiteDice[i]);
+
+    safeSend({
+      type: "SUBMIT_DICE",
+      dice,
+      room_id: roomId,
+      client_id: myClientIdRef.current
+    });
+
     setSelectedDice([]);
   };
 
-  // ==================== PANTALLA DE CONEXIÓN ====================
-  if (connecting || !connected) {
+  // ================= UI =================
+
+  if (!connected || screen === "loading") {
     return (
       <View style={style_01.container}>
-        <Text style={style_01.title}>🎲 DADO TRIPLE</Text>
-        <ActivityIndicator size="large" color="#ff3333" style={{ marginTop: 50 }} />
-        <Text style={{ color: '#fff', marginTop: 20 }}>Conectando al servidor...</Text>
+        <ActivityIndicator size="large" color="#ff3333"/>
       </View>
     );
   }
 
-  // ==================== PANTALLA DE NOMBRE ====================
-  if (!nickEntered) {
+  if (screen === "home") {
     return (
       <View style={style_01.container}>
         <Text style={style_01.title}>🎲 DADO TRIPLE</Text>
-        <Text style={{ color: '#fff', marginVertical: 30, fontSize: 20 }}>Ingresa tu nombre</Text>
+
+        <TouchableOpacity onPress={createRoom} style={style_01.button}>
+          <Text style={{color:'#fff'}}>CREAR SALA</Text>
+        </TouchableOpacity>
+
         <TextInput
-          style={{ backgroundColor: '#333', color: '#fff', padding: 18, borderRadius: 12, fontSize: 18, width: '90%', alignSelf: 'center' }}
-          placeholder="Tu nombre de usuario"
+          placeholder="Código sala"
+          placeholderTextColor="#aaa"
+          value={inputRoom}
+          onChangeText={setInputRoom}
+          style={style_01.input}
+        />
+
+        <TouchableOpacity onPress={joinRoom} style={style_01.button}>
+          <Text style={{color:'#fff'}}>UNIRSE</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (screen === "nick") {
+    return (
+      <View style={style_01.container}>
+        <Text style={{color:'#fff'}}>Sala: {roomId}</Text>
+
+        <TextInput
+          placeholder="Tu nombre"
+          placeholderTextColor="#aaa"
           value={nick}
           onChangeText={setNick}
+          style={style_01.input}
         />
-        <TouchableOpacity 
-          style={{ backgroundColor: '#ff3333', padding: 18, borderRadius: 12, marginTop: 30, width: '80%', alignSelf: 'center' }}
-          onPress={sendNick}
-        >
-          <Text style={{ color: '#fff', textAlign: 'center', fontWeight: 'bold', fontSize: 18 }}>ENTRAR AL JUEGO</Text>
+
+        <TouchableOpacity onPress={sendNick} style={style_01.button}>
+          <Text style={{color:'#fff'}}>ENTRAR</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  // ==================== PANTALLA LOBBY (CORREGIDA) ====================
-  if (gameState.phase === 'lobby') {
+  if (screen === "lobby") {
     return (
       <View style={style_01.container}>
-        <Text style={style_01.title}>🎲 LOBBY - DADO TRIPLE</Text>
-        <Text style={{ color: '#fff', fontSize: 18, marginBottom: 15 }}>
-          Jugadores conectados ({gameState.players.length})
-        </Text>
-        <Text style={{ color: '#aaa', fontSize: 12, marginBottom: 8 }}>
-          DEBUG: {JSON.stringify(gameState.players)}
-        </Text>
-        
-        <ScrollView style={{ flex: 1 }}>
-          {gameState.players.map((p, index) => {
-            return (
-              <View key={index} style={{
-                backgroundColor: '#222',
-                padding: 15,
-                marginBottom: 8,
-                borderRadius: 10,
-                flexDirection: 'row',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                borderWidth: p.client_id === myClientIdRef.current ? 3 : 0,
-                borderColor: '#ffff00'
-              }}>
-                <Text style={{ color: '#fff', fontSize: 18 }}>
-                  {p.nick}
-                </Text>
-                {p.ready && <Text style={{ color: '#0f0', fontWeight: 'bold' }}>✅ LISTO</Text>}
-              </View>
-            );
-          })}
+        <Text style={{color:'#fff'}}>Sala: {roomId}</Text>
+
+        <ScrollView>
+          {gameState.players.map((p, i) => (
+            <Text key={i} style={{color:'#fff'}}>
+              {p.nick} {p.ready ? "✅" : ""}
+            </Text>
+          ))}
         </ScrollView>
 
-        <TouchableOpacity 
-          style={{ backgroundColor: '#00cc00', padding: 18, borderRadius: 12, marginTop: 20 }}
-          onPress={toggleReady}
-        >
-          <Text style={{ color: '#000', textAlign: 'center', fontWeight: 'bold', fontSize: 20 }}>ESTOY LISTO</Text>
+        <TouchableOpacity onPress={toggleReady} style={style_01.button}>
+          <Text style={{color:'#fff'}}>LISTO</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  // ==================== PANTALLA DEL JUEGO ====================
   return (
     <ScrollView style={style_01.container}>
-      <Text style={style_01.title}>🎲 DADO TRIPLE</Text>
-      <Text style={style_01.subtitle}>Fase: {gameState.phase.toUpperCase()} • Ronda {gameState.round}</Text>
+      <Text style={{color:'#fff'}}>Ronda {gameState.round}</Text>
 
-      <Text style={{color:'#fff', fontSize:18, marginTop:15}}>Elige tu predicción:</Text>
-      <View style={style_01.predictionContainer}>
-        {['ZERO', 'MIN', 'MORE', 'MAX'].map((pred) => (
-          <TouchableOpacity
-            key={pred}
-            style={[
-              style_01.predictionButton,
-              pred === 'ZERO' && style_01.zero,
-              pred === 'MIN' && style_01.min,
-              pred === 'MORE' && style_01.more,
-              pred === 'MAX' && style_01.max,
-              prediction === pred && style_01.selected
-            ]}
-            onPress={() => selectPrediction(pred)}
-          >
-            <Text style={{ color: '#fff', fontWeight: 'bold' }}>{pred}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+      {['ZERO','MIN','MORE','MAX'].map(p => (
+        <TouchableOpacity key={p} onPress={() => selectPrediction(p)}>
+          <Text style={{color:'#fff'}}>{p}</Text>
+        </TouchableOpacity>
+      ))}
 
-      <View style={style_01.diceContainer}>
-        <Text style={{ color: '#fff', fontSize: 18, marginBottom: 12 }}>Dados Blancos</Text>
-        <View style={style_01.diceRow}>
-          {whiteDice.map((value, index) => (
-            <TouchableOpacity
-              key={index}
-              style={[
-                style_01.die,
-                selectedDice.includes(index) && { borderColor: '#ffff00', backgroundColor: '#ffee00' }
-              ]}
-              onPress={() => toggleDie(index)}
-            >
-              <Text style={style_01.dieText}>{value}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
+      {whiteDice.map((d,i) => (
+        <TouchableOpacity key={i} onPress={() => toggleDie(i)}>
+          <Text style={{color:'#fff'}}>{d}</Text>
+        </TouchableOpacity>
+      ))}
 
-      <TouchableOpacity style={style_01.sendButton} onPress={sendCombination}>
-        <Text style={{ color: '#fff', fontSize: 19, fontWeight: 'bold', textAlign: 'center' }}>
-          ENVIAR COMBINACIÓN ({selectedDice.length}/3)
-        </Text>
+      <TouchableOpacity onPress={sendDice}>
+        <Text style={{color:'#fff'}}>ENVIAR</Text>
       </TouchableOpacity>
-
-      <View style={style_01.logContainer}>
-        <ScrollView>
-          <Text style={style_01.logText}>{log}</Text>
-        </ScrollView>
-      </View>
     </ScrollView>
   );
 };
