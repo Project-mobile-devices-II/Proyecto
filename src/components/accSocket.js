@@ -23,30 +23,16 @@ const AccSocket = () => {
   // ================= SAFE SEND =================
   const safeSend = (data) => {
     console.log("📤 INTENTANDO ENVIAR:", data);
-
-    if (!wsRef.current) {
-      console.log("❌ WS NULL");
-      return;
-    }
-
+    if (!wsRef.current) { console.log("❌ WS NULL"); return; }
     console.log("📡 WS STATE:", wsRef.current.readyState);
-
-    if (wsRef.current.readyState !== 1) {
-      console.log("❌ WS NO ABIERTO");
-      Alert.alert("Error", "Conexión cerrada");
-      return;
-    }
-
+    if (wsRef.current.readyState !== 1) { console.log("❌ WS NO ABIERTO"); Alert.alert("Error", "Conexión cerrada"); return; }
     wsRef.current.send(JSON.stringify(data));
   };
 
   // ================= INIT =================
   useEffect(() => {
-
     const connect = async () => {
-
       let cid = await AsyncStorage.getItem('client_id');
-
       if (!cid) {
         cid = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
         await AsyncStorage.setItem('client_id', cid);
@@ -78,10 +64,10 @@ const AccSocket = () => {
       };
 
       ws.onmessage = (e) => {
-        console.log("📩 RECIBIDO:", e.data);
-
+        console.log("📩 RECIBIDO RAW:", e.data);
         try {
           const data = JSON.parse(e.data);
+          console.log("📦 TIPO:", data.type || "SIN TYPE");
 
           if (data.type === "ROOM_CREATED") {
             console.log("🏠 ROOM CREATED:", data.room_id);
@@ -104,15 +90,22 @@ const AccSocket = () => {
           }
 
           if (data.players) {
-            console.log("👥 GAME STATE:", data.players.length);
+            console.log("👥 PLAYERS RECIBIDOS:", JSON.stringify(data.players));
+            console.log("🔍 MI CID:", myClientIdRef.current);
+            console.log("📊 FASE:", data.phase);
 
             setGameState(data);
             setWhiteDice(data.white_dice || []);
 
             const hasMe = data.players.some(p => p.client_id === myClientIdRef.current);
+            console.log("✅ HASME:", hasMe);
 
             if (hasMe) {
-              setScreen(data.phase === "lobby" ? "lobby" : "game");
+              const nextScreen = data.phase === "lobby" ? "lobby" : "game";
+              console.log("➡️ CAMBIANDO A PANTALLA:", nextScreen);
+              setScreen(nextScreen);
+            } else {
+              console.log("❌ NO ME ENCONTRÉ EN LA LISTA DE JUGADORES");
             }
           }
 
@@ -123,66 +116,59 @@ const AccSocket = () => {
     };
 
     connect();
-
   }, []);
 
   // ================= ROOM =================
-
   const createRoom = () => {
     console.log("🔥 CLICK CREATE ROOM");
-
-    safeSend({
-      type: "CREATE_ROOM",
-      client_id: myClientIdRef.current
-    });
+    safeSend({ type: "CREATE_ROOM", client_id: myClientIdRef.current });
   };
 
   const joinRoom = () => {
     console.log("🔥 CLICK JOIN ROOM");
-
     if (!inputRoom) return Alert.alert("Error", "Ingresa código");
-
-    safeSend({
-      type: "JOIN_ROOM",
-      room_id: inputRoom,
-      client_id: myClientIdRef.current
-    });
+    safeSend({ type: "JOIN_ROOM", room_id: inputRoom, client_id: myClientIdRef.current });
   };
 
   // ================= NICK =================
-
   const sendNick = () => {
-    console.log("🔥 CLICK JOIN GAME");
-
+    console.log("🔥 CLICK ENTRAR");
+    console.log("📋 CID:", myClientIdRef.current);
+    console.log("📋 ROOM:", roomId);
+    console.log("📋 NICK:", nick);
     if (!nick) return Alert.alert("Error", "Ingresa nombre");
-
-    safeSend({
-      type: "JOIN",
-      nick,
-      client_id: myClientIdRef.current,
-      room_id: roomId
-    });
+    safeSend({ type: "JOIN", nick, client_id: myClientIdRef.current, room_id: roomId });
   };
 
   // ================= GAME =================
-
   const toggleReady = () => {
-    safeSend({
-      type: "READY",
-      room_id: roomId,
-      client_id: myClientIdRef.current
-    });
+    safeSend({ type: "READY", room_id: roomId, client_id: myClientIdRef.current });
+  };
+
+  const leaveRoom = () => {
+    Alert.alert(
+      "Salir de la sala",
+      "¿Seguro que quieres salir?",
+      [
+        { text: "Cancelar", style: "cancel" },
+        {
+          text: "Salir",
+          style: "destructive",
+          onPress: () => {
+            safeSend({ type: "LEAVE_ROOM", room_id: roomId, client_id: myClientIdRef.current });
+            setRoomId('');
+            setNick('');
+            setGameState({ phase: 'lobby', players: [] });
+            setScreen("home");
+          }
+        }
+      ]
+    );
   };
 
   const selectPrediction = (p) => {
     setPrediction(p);
-
-    safeSend({
-      type: "PREDICTION",
-      value: p,
-      room_id: roomId,
-      client_id: myClientIdRef.current
-    });
+    safeSend({ type: "PREDICTION", value: p, room_id: roomId, client_id: myClientIdRef.current });
   };
 
   const toggleDie = (i) => {
@@ -195,16 +181,8 @@ const AccSocket = () => {
 
   const sendDice = () => {
     if (selectedDice.length !== 3) return Alert.alert("Selecciona 3");
-
     const dice = selectedDice.map(i => whiteDice[i]);
-
-    safeSend({
-      type: "SUBMIT_DICE",
-      dice,
-      room_id: roomId,
-      client_id: myClientIdRef.current
-    });
-
+    safeSend({ type: "SUBMIT_DICE", dice, room_id: roomId, client_id: myClientIdRef.current });
     setSelectedDice([]);
   };
 
@@ -213,18 +191,19 @@ const AccSocket = () => {
   if (!connected || screen === "loading") {
     return (
       <View style={style_01.container}>
-        <ActivityIndicator size="large" color="#ff3333"/>
+        <ActivityIndicator size="large" color="#ff3333" />
       </View>
     );
   }
 
+  // ================= HOME =================
   if (screen === "home") {
     return (
       <View style={style_01.container}>
         <Text style={style_01.title}>🎲 DADO TRIPLE</Text>
 
         <TouchableOpacity onPress={createRoom} style={style_01.button}>
-          <Text style={{color:'#fff'}}>CREAR SALA</Text>
+          <Text style={style_01.buttonText}>CREAR SALA</Text>
         </TouchableOpacity>
 
         <TextInput
@@ -236,16 +215,29 @@ const AccSocket = () => {
         />
 
         <TouchableOpacity onPress={joinRoom} style={style_01.button}>
-          <Text style={{color:'#fff'}}>UNIRSE</Text>
+          <Text style={style_01.buttonText}>UNIRSE</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
+  // ================= NICK =================
   if (screen === "nick") {
     return (
       <View style={style_01.container}>
-        <Text style={{color:'#fff'}}>Sala: {roomId}</Text>
+
+        <View style={style_01.header}>
+          <TouchableOpacity onPress={() => setScreen("home")} style={style_01.backButton}>
+            <Text style={style_01.backButtonText}>←</Text>
+          </TouchableOpacity>
+          <Text style={[style_01.title, { flex: 1 }]}>DADO TRIPLE</Text>
+          <View style={style_01.headerSpacer} />
+        </View>
+
+        <View style={style_01.roomCodeBox}>
+          <Text style={style_01.roomCodeLabel}>CÓDIGO DE SALA</Text>
+          <Text style={style_01.roomCodeValue}>{roomId}</Text>
+        </View>
 
         <TextInput
           placeholder="Tu nombre"
@@ -256,50 +248,149 @@ const AccSocket = () => {
         />
 
         <TouchableOpacity onPress={sendNick} style={style_01.button}>
-          <Text style={{color:'#fff'}}>ENTRAR</Text>
+          <Text style={style_01.buttonText}>ENTRAR</Text>
         </TouchableOpacity>
+
       </View>
     );
   }
 
+  // ================= LOBBY =================
   if (screen === "lobby") {
+    const me = gameState.players.find(p => p.client_id === myClientIdRef.current);
+    const isReady = me?.ready || false;
+    const isOwner = gameState.players[0]?.client_id === myClientIdRef.current;
+    const allReady = gameState.players.length >= 4 && gameState.players.every(p => p.ready);
+
     return (
       <View style={style_01.container}>
-        <Text style={{color:'#fff'}}>Sala: {roomId}</Text>
 
-        <ScrollView>
-          {gameState.players.map((p, i) => (
-            <Text key={i} style={{color:'#fff'}}>
-              {p.nick} {p.ready ? "✅" : ""}
-            </Text>
-          ))}
+        {/* HEADER */}
+        <View style={style_01.header}>
+          <TouchableOpacity onPress={() => setScreen("nick")} style={style_01.backButton}>
+            <Text style={style_01.backButtonText}>←</Text>
+          </TouchableOpacity>
+          <Text style={[style_01.title, { flex: 1 }]}>DADO TRIPLE</Text>
+          <View style={style_01.headerSpacer} />
+        </View>
+
+        <Text style={style_01.screenSubtitle}>Sala de espera</Text>
+
+        {/* CÓDIGO DE SALA */}
+        <View style={style_01.roomCodeBox}>
+          <Text style={style_01.roomCodeLabel}>CÓDIGO DE SALA</Text>
+          <Text style={style_01.roomCodeValue}>{roomId}</Text>
+          <Text style={style_01.roomCodeHint}>Comparte este código con tus amigos</Text>
+        </View>
+
+        {/* CONTADOR Y SECCIÓN */}
+        <Text style={style_01.playerCount}>{gameState.players.length} / 10 jugadores</Text>
+        <Text style={style_01.sectionLabel}>JUGADORES</Text>
+
+        {/* LISTA DE JUGADORES */}
+        <ScrollView style={{ flex: 1 }}>
+          {gameState.players.map((p, i) => {
+            const isMe = p.client_id === myClientIdRef.current;
+            const initial = p.nick ? p.nick[0].toUpperCase() : '?';
+
+            return (
+              <View key={i} style={isMe ? style_01.playerCardMe : style_01.playerCard}>
+
+                <View style={style_01.playerRow}>
+                  <View style={isMe ? style_01.playerAvatarMe : style_01.playerAvatar}>
+                    <Text style={style_01.playerAvatarText}>{initial}</Text>
+                  </View>
+                  <View>
+                    <Text style={style_01.playerText}>{p.nick}</Text>
+                    {isMe && <Text style={style_01.playerTag}>TÚ</Text>}
+                    {i === 0 && <Text style={style_01.ownerTag}>DUEÑO</Text>}
+                  </View>
+                </View>
+
+                <View style={p.ready ? style_01.readyBadge : style_01.waitingBadge}>
+                  <Text style={p.ready ? style_01.readyBadgeText : style_01.waitingBadgeText}>
+                    {p.ready ? 'Listo' : 'Esperando'}
+                  </Text>
+                </View>
+
+              </View>
+            );
+          })}
         </ScrollView>
 
-        <TouchableOpacity onPress={toggleReady} style={style_01.button}>
-          <Text style={{color:'#fff'}}>LISTO</Text>
+        {/* MENSAJE DE ESTADO */}
+        {gameState.players.length < 4 ? (
+          <Text style={style_01.statusText}>
+            Se necesitan al menos 4 jugadores ({gameState.players.length}/4)
+          </Text>
+        ) : allReady ? (
+          <Text style={style_01.statusTextSuccess}>¡Todos listos!</Text>
+        ) : (
+          <Text style={style_01.statusText}>Esperando que todos estén listos...</Text>
+        )}
+
+        {/* BOTÓN LISTO */}
+        <TouchableOpacity
+          onPress={toggleReady}
+          style={isReady ? style_01.buttonReady : style_01.button}
+        >
+          <Text style={style_01.buttonText}>
+            {isReady ? 'YA NO ESTOY LISTO' : 'ESTOY LISTO'}
+          </Text>
         </TouchableOpacity>
+
+        {/* BOTÓN INICIAR — solo para el dueño */}
+        {isOwner && (
+          allReady ? (
+            <TouchableOpacity
+              onPress={() => safeSend({
+                type: "START_GAME",
+                room_id: roomId,
+                client_id: myClientIdRef.current
+              })}
+              style={style_01.buttonStart}
+            >
+              <Text style={style_01.buttonStartText}>INICIAR PARTIDA</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={style_01.buttonDisabled}>
+              <Text style={style_01.buttonDisabledText}>
+                {gameState.players.length < 4
+                  ? `Faltan ${4 - gameState.players.length} jugador${4 - gameState.players.length === 1 ? '' : 'es'} más`
+                  : 'Todos deben estar listos antes de iniciar'}
+              </Text>
+            </View>
+          )
+        )}
+
+        {/* BOTÓN SALIR */}
+        <TouchableOpacity onPress={leaveRoom} style={style_01.buttonLeave}>
+          <Text style={style_01.buttonLeaveText}>SALIR DE LA SALA</Text>
+        </TouchableOpacity>
+
       </View>
     );
   }
 
+  // ================= GAME (placeholder) =================
   return (
     <ScrollView style={style_01.container}>
-      <Text style={{color:'#fff'}}>Ronda {gameState.round}</Text>
+      <Text style={style_01.text}>Ronda {gameState.round}</Text>
 
-      {['ZERO','MIN','MORE','MAX'].map(p => (
+      {['ZERO', 'MIN', 'MORE', 'MAX'].map(p => (
         <TouchableOpacity key={p} onPress={() => selectPrediction(p)}>
-          <Text style={{color:'#fff'}}>{p}</Text>
+          <Text style={style_01.text}>{p}</Text>
         </TouchableOpacity>
       ))}
 
-      {whiteDice.map((d,i) => (
+      {whiteDice.map((d, i) => (
         <TouchableOpacity key={i} onPress={() => toggleDie(i)}>
-          <Text style={{color:'#fff'}}>{d}</Text>
+          <Text style={style_01.text}>{d}</Text>
         </TouchableOpacity>
       ))}
 
-      <TouchableOpacity onPress={sendDice}>
-        <Text style={{color:'#fff'}}>ENVIAR</Text>
+      <TouchableOpacity onPress={sendDice} style={style_01.sendButton}>
+        <Text style={style_01.sendButtonText}>ENVIAR</Text>
       </TouchableOpacity>
     </ScrollView>
   );

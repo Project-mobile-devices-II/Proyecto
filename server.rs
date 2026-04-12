@@ -53,7 +53,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let clients: Clients = Arc::new(TokioMutex::new(HashMap::new()));
     let rooms: Rooms = Arc::new(TokioMutex::new(HashMap::new()));
 
-    // 🔥 MONGO LOCAL CORRECTO
     let mongo_client = Client::with_uri_str(
         "mongodb://ahian:27040505@127.0.0.1:27017/?authSource=admin"
     ).await?;
@@ -94,7 +93,6 @@ async fn handle_connection(
 ) {
     println!("🔌 Conectado: {}", addr);
 
-    // handshake
     let mut buffer = [0; 2048];
     let n = socket.read(&mut buffer).await.unwrap();
     let request = String::from_utf8_lossy(&buffer[..n]);
@@ -157,7 +155,6 @@ async fn handle_connection(
 
         println!("📩 {}", msg);
 
-        // 🔥 GUARDAR MOVES
         if let Ok(data) = serde_json::from_str::<serde_json::Value>(&msg) {
             let cid = data["client_id"].as_str().unwrap_or("unknown");
 
@@ -263,41 +260,65 @@ async fn process_message(
 
             println!("👤 {} entra a {}", nick, room_id);
 
-            let mut rooms_lock = rooms.lock().await;
+            {
+                let mut rooms_lock = rooms.lock().await;
 
-            if let Some(room) = rooms_lock.get_mut(&room_id) {
+                if let Some(room) = rooms_lock.get_mut(&room_id) {
 
-                if let Some(p) = room.players.iter_mut().find(|p| p.client_id == client_id) {
-                    p.nick = nick.to_string();
-                    p.addr = *addr;
-                } else {
-                    room.players.push(Player {
-                        addr: *addr,
-                        client_id: client_id.to_string(),
-                        nick: nick.to_string(),
-                        room_id: room_id.clone(),
-                        score: 0,
-                        prediction: None,
-                        ready: false,
-                    });
+                    if let Some(p) = room.players.iter_mut().find(|p| p.client_id == client_id) {
+                        p.nick = nick.to_string();
+                        p.addr = *addr;
+                    } else {
+                        room.players.push(Player {
+                            addr: *addr,
+                            client_id: client_id.to_string(),
+                            nick: nick.to_string(),
+                            room_id: room_id.clone(),
+                            score: 0,
+                            prediction: None,
+                            ready: false,
+                        });
+                    }
+
+                    let options = UpdateOptions::builder().upsert(true).build();
+
+                    let _ = players_coll.update_one(
+                        doc! { "client_id": client_id },
+                        doc! {
+                            "$set": {
+                                "nick": nick,
+                                "room_id": &room_id,
+                                "last_seen": DateTime::now()
+                            }
+                        },
+                        options,
+                    ).await;
                 }
+            } // 🔓 lock se suelta aquí
 
-                let options = UpdateOptions::builder().upsert(true).build();
+            broadcast_room(&room_id, clients, rooms).await;
+        }
 
-                let _ = players_coll.update_one(
-                    doc! { "client_id": client_id },
-                    doc! {
-                        "$set": {
-                            "nick": nick,
-                            "room_id": &room_id,
-                            "last_seen": DateTime::now()
-                        }
-                    },
-                    options,
-                ).await;
+        // ================= READY =================
+        "READY" => {
 
-                broadcast_room(&room_id, clients, rooms).await;
-            }
+            let room_id = data["room_id"].as_str().unwrap_or("").to_string();
+            let client_id = data["client_id"].as_str().unwrap_or("");
+
+            println!("✅ READY de {} en {}", client_id, room_id);
+
+            {
+                let mut rooms_lock = rooms.lock().await;
+
+                if let Some(room) = rooms_lock.get_mut(&room_id) {
+                    if let Some(p) = room.players.iter_mut().find(|p| p.client_id == client_id) {
+                        p.ready = !p.ready;
+                        println!("🔄 {} ready: {}", p.nick, p.ready);
+                    }
+                }
+            } // 🔓 lock se suelta aquí
+
+            broadcast_room(&room_id, clients, rooms).await;
         }
 
         _ => {}
