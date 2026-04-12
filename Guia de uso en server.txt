@@ -1,0 +1,125 @@
+Para encender el server(TIENE LA MISMA ESTRUCTURA DEL SERVER):
+
+usar ls
+
+	ls
+
+root@AhianQuesada:/home/ahian# ls
+dado-triple
+
+usar cd para entrar a la carpeta
+
+	cd/dado-triple
+	
+usamos denuevo ls
+
+	ls
+	
+entramos a server-rust con "cd"
+
+		cd server-rust/
+		
+damos denuevo ls
+
+	ls
+	
+root@AhianQuesada:/home/ahian/dado-triple/server-rust# ls
+Cargo.lock  Cargo.toml  src  target
+
+NOTA: Elemtento importante de esta seccion en Cargo.toml que posee las dependencias del server
+
+Entramos a src con "cd"
+
+	cd src/
+	
+hacemos un ls
+
+	ls
+	
+root@AhianQuesada:/home/ahian/dado-triple/server-rust/src# ls
+main.rs
+
+NOTA: main.rs posee el codigo de el servidor, para correrlo usar
+
+	cargo run
+
+Usar el comando dentro de la ruta actual del main.rs
+
+
+
+GUIA PARA VER LA DATA GUARDADA DE MONGO:
+
+usar el comando mongosh para entrar a la terminal de mongosh
+
+	mongosh
+	
+Dentro de la terminal "Test>" usar el siguiente comando
+
+	use ahian
+
+los colocará dentro del user "ahian", para ver las bases de datos usar
+
+	show dbs
+	
+Deberías ver algo como:
+
+admin
+config
+local
+dado_triple
+
+Entrar a la base de datos:
+
+	use dado_triple
+	
+Ver las colecciones:
+
+	show collections
+	
+Aquí deberían salir:
+
+	players
+	rooms
+	moves
+	
+	
+4. Ver contenido de cada colección
+	Players
+	db.players.find().pretty()
+	
+	Rooms
+	db.rooms.find().pretty()
+	
+	Moves
+	db.moves.find().pretty()
+	
+NOTA IMPORTANTE️‼️: Cada vez que se agrega data eliminar los datos registrados, para ver detenidamente la entrada de los datos
+y tener 2 sesiones del servidor para ver el servidor y la base de datos en tiempo real, los comandos para eliminar los registros son los siguientes:
+
+	Players
+	db.players.deleteMany({})
+	
+	Rooms
+	db.rooms.deleteMany({})
+	
+	Moves
+	db.moves.deleteMany({})
+
+	Esto:
+elimina TODOS los documentos
+pero mantiene la colección
+
+BORRAR completamente la colección (más agresivo)
+	db.players.drop()
+	db.rooms.drop()
+	db.moves.drop()
+
+	Esto:
+elimina la colección entera
+incluyendo índices
+🔎 Verificar que se borró
+
+	db.players.find()
+	db.rooms.find()
+	db.moves.find()
+	
