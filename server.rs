@@ -12,8 +12,8 @@ use mongodb::{Client, Collection};
 use mongodb::bson::{doc, DateTime};
 use mongodb::options::UpdateOptions;
 
-use sha1::Digest;
-use base64::Engine as _;
+use sha1::{Sha1, Digest};
+use base64::{engine::general_purpose, Engine as _};
 
 // ===================== MODELOS =====================
 
@@ -47,19 +47,24 @@ type Rooms = Arc<TokioMutex<HashMap<String, GameState>>>;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+
     let listener = TcpListener::bind("0.0.0.0:5000").await?;
 
     let clients: Clients = Arc::new(TokioMutex::new(HashMap::new()));
     let rooms: Rooms = Arc::new(TokioMutex::new(HashMap::new()));
 
-    let mongo_client = Client::with_uri_str("mongodb://admin:secret@192.168.152.179:27017/?authSource=admin").await?;
+    // 🔥 MONGO LOCAL CORRECTO
+    let mongo_client = Client::with_uri_str(
+        "mongodb://ahian:27040505@127.0.0.1:27017/?authSource=admin"
+    ).await?;
+
     let db = mongo_client.database("dado_triple");
 
     let players_coll: Collection<_> = db.collection("players");
     let rooms_coll: Collection<_> = db.collection("rooms");
     let moves_coll: Collection<_> = db.collection("moves");
 
-    println!("🚀 SERVER FINAL FUNCIONANDO");
+    println!("🚀 SERVER FUNCIONANDO CON MONGO LOCAL");
 
     loop {
         let (socket, addr) = listener.accept().await?;
@@ -96,9 +101,11 @@ async fn handle_connection(
 
     if let Some(key_line) = request.lines().find(|l| l.starts_with("Sec-WebSocket-Key:")) {
         let key = key_line.split(':').nth(1).unwrap().trim();
-        let mut hasher = sha1::Sha1::new();
+
+        let mut hasher = Sha1::new();
         hasher.update(format!("{}258EAFA5-E914-47DA-95CA-C5AB0DC85B11", key));
-        let accept = base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+
+        let accept = general_purpose::STANDARD.encode(hasher.finalize());
 
         let response = format!(
             "HTTP/1.1 101 Switching Protocols\r\n\
@@ -121,8 +128,6 @@ async fn handle_connection(
             let _ = send_ws_text(&mut writer, &msg).await;
         }
     });
-
-    let mut my_room = String::new();
 
     loop {
         let mut header = [0u8; 2];
@@ -150,8 +155,9 @@ async fn handle_connection(
 
         let msg = String::from_utf8_lossy(&decoded).to_string();
 
-        println!("📩 MSG: {}", msg);
+        println!("📩 {}", msg);
 
+        // 🔥 GUARDAR MOVES
         if let Ok(data) = serde_json::from_str::<serde_json::Value>(&msg) {
             let cid = data["client_id"].as_str().unwrap_or("unknown");
 
@@ -171,16 +177,14 @@ async fn handle_connection(
             ).await;
         }
 
-        if let Some(room_id) = process_message(
+        process_message(
             &msg,
             &addr,
             &clients,
             &rooms,
             &players_coll,
             &rooms_coll,
-        ).await {
-            my_room = room_id;
-        }
+        ).await;
     }
 
     println!("❌ Desconectado {}", addr);
@@ -196,25 +200,32 @@ async fn process_message(
     rooms: &Rooms,
     players_coll: &Collection<mongodb::bson::Document>,
     rooms_coll: &Collection<mongodb::bson::Document>,
-) -> Option<String> {
+) {
 
-    let data: serde_json::Value = serde_json::from_str(msg).ok()?;
-    let t = data["type"].as_str()?;
+    let data: serde_json::Value = match serde_json::from_str(msg) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    let t = match data["type"].as_str() {
+        Some(v) => v,
+        None => return,
+    };
 
     match t {
 
-
-
+        // ================= CREATE ROOM =================
         "CREATE_ROOM" => {
+
             let client_id = data["client_id"].as_str().unwrap_or("");
             let room_id = generate_code();
 
-            println!("🏠 Creando sala {}", room_id);
+            println!("🏠 Nueva sala {}", room_id);
 
-            rooms_coll.insert_one(doc! {
+            let _ = rooms_coll.insert_one(doc! {
                 "room_id": &room_id,
                 "created_at": DateTime::now()
-            }, None).await.unwrap();
+            }, None).await;
 
             let mut room = GameState {
                 round: 1,
@@ -241,22 +252,21 @@ async fn process_message(
                 "type": "ROOM_CREATED",
                 "room_id": room_id
             })).await;
-
-            return Some(room_id);
         }
 
+        // ================= JOIN =================
         "JOIN" => {
-            let room_id = data["room_id"].as_str()?.to_string();
+
+            let room_id = data["room_id"].as_str().unwrap_or("").to_string();
             let nick = data["nick"].as_str().unwrap_or("Anon");
             let client_id = data["client_id"].as_str().unwrap_or("");
 
-            println!("👤 JOIN {} en sala {}", nick, room_id);
+            println!("👤 {} entra a {}", nick, room_id);
 
             let mut rooms_lock = rooms.lock().await;
 
             if let Some(room) = rooms_lock.get_mut(&room_id) {
 
-                // evitar duplicado por client_id
                 if let Some(p) = room.players.iter_mut().find(|p| p.client_id == client_id) {
                     p.nick = nick.to_string();
                     p.addr = *addr;
@@ -272,8 +282,7 @@ async fn process_message(
                     });
                 }
 
-                // 🔥 guardar en Mongo (opcional pero correcto)
-                let options = mongodb::options::UpdateOptions::builder().upsert(true).build();
+                let options = UpdateOptions::builder().upsert(true).build();
 
                 let _ = players_coll.update_one(
                     doc! { "client_id": client_id },
@@ -287,19 +296,12 @@ async fn process_message(
                     options,
                 ).await;
 
-                // 🔥 enviar estado a TODOS en la sala
                 broadcast_room(&room_id, clients, rooms).await;
-
-                return Some(room_id);
-            } else {
-                println!("❌ Sala no existe: {}", room_id);
             }
         }
 
         _ => {}
     }
-
-    None
 }
 
 // ===================== HELPERS =====================
@@ -313,13 +315,43 @@ fn generate_code() -> String {
         .collect()
 }
 
-async fn send_to_client(clients: &Clients, addr: &SocketAddr, msg: serde_json::Value) {
+async fn send_to_client(
+    clients: &Clients,
+    addr: &SocketAddr,
+    msg: serde_json::Value
+) {
     if let Some(tx) = clients.lock().await.get(addr) {
         let _ = tx.send(msg.to_string());
     }
 }
 
-async fn send_ws_text(writer: &mut OwnedWriteHalf, message: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn broadcast_room(room_id: &str, clients: &Clients, rooms: &Rooms) {
+
+    let rooms_guard = rooms.lock().await;
+
+    if let Some(room) = rooms_guard.get(room_id) {
+
+        let state = serde_json::to_string(room).unwrap();
+
+        let clients_guard = clients.lock().await;
+
+        println!("📡 Broadcast sala {}", room_id);
+
+        for p in &room.players {
+            println!("➡️ {}", p.addr);
+
+            if let Some(tx) = clients_guard.get(&p.addr) {
+                let _ = tx.send(state.clone());
+            }
+        }
+    }
+}
+
+async fn send_ws_text(
+    writer: &mut OwnedWriteHalf,
+    message: &str
+) -> Result<(), Box<dyn std::error::Error>> {
+
     let payload = message.as_bytes();
     let len = payload.len();
 
@@ -336,33 +368,4 @@ async fn send_ws_text(writer: &mut OwnedWriteHalf, message: &str) -> Result<(), 
     writer.write_all(&frame).await?;
 
     Ok(())
-}
-
-async fn broadcast_room(room_id: &str, clients: &Clients, rooms: &Rooms) {
-    let rooms_guard = rooms.lock().await;
-
-    if let Some(room) = rooms_guard.get(room_id) {
-        let state = serde_json::to_string(room).unwrap();
-
-        let clients_guard = clients.lock().await;
-
-        // 🔥 DEBUG
-        println!("👥 CLIENTES CONECTADOS:");
-        for (addr, _) in clients_guard.iter() {
-            println!("🟢 Cliente: {}", addr);
-        }
-
-        println!("📡 Enviando estado a {} jugadores", room.players.len());
-
-        for p in &room.players {
-            println!("➡️ Player addr: {}", p.addr);
-
-            if let Some(tx) = clients_guard.get(&p.addr) {
-                println!("✅ ENCONTRADO, enviando...");
-                let _ = tx.send(state.clone());
-            } else {
-                println!("❌ NO ENCONTRADO EN CLIENTS");
-            }
-        }
-    }
 }
