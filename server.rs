@@ -321,6 +321,52 @@ async fn process_message(
             broadcast_room(&room_id, clients, rooms).await;
         }
 
+        // ================= LEAVE ROOM =================
+        "LEAVE_ROOM" => {
+
+            let room_id = data["room_id"].as_str().unwrap_or("").to_string();
+            let client_id = data["client_id"].as_str().unwrap_or("");
+
+            println!("🚪 {} saliendo de {}", client_id, room_id);
+
+            let is_owner;
+
+            {
+                let mut rooms_lock = rooms.lock().await;
+
+                if let Some(room) = rooms_lock.get_mut(&room_id) {
+
+                    is_owner = room.players.first()
+                        .map(|p| p.client_id == client_id)
+                        .unwrap_or(false);
+
+                    if is_owner {
+                        // si es el dueño, eliminar la sala completa de memoria
+                        rooms_lock.remove(&room_id);
+                        println!("🗑️ Sala {} eliminada de memoria", room_id);
+                    } else {
+                        // si no es el dueño, solo remover al jugador
+                        room.players.retain(|p| p.client_id != client_id);
+                        println!("👋 Jugador removido de {}", room_id);
+                    }
+
+                } else {
+                    return;
+                }
+            } // 🔓 lock se suelta aquí
+
+            if is_owner {
+                // eliminar sala de MongoDB
+                let _ = rooms_coll.delete_one(
+                    doc! { "room_id": &room_id }, None
+                ).await;
+                println!("🗑️ Sala {} eliminada de MongoDB", room_id);
+            } else {
+                // avisar a los demás jugadores que alguien salió
+                broadcast_room(&room_id, clients, rooms).await;
+            }
+        }
+
         _ => {}
     }
 }
