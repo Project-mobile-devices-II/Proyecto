@@ -97,7 +97,7 @@ async fn handle_connection(
     let n = match socket.read(&mut buffer).await {
         Ok(n) => n,
         Err(_) => return,
-};
+    };
     let request = String::from_utf8_lossy(&buffer[..n]);
 
     if let Some(key_line) = request.lines().find(|l| l.starts_with("Sec-WebSocket-Key:")) {
@@ -254,6 +254,33 @@ async fn process_message(
             })).await;
         }
 
+        // ================= JOIN ROOM =================
+        "JOIN_ROOM" => {
+
+            let room_id = data["room_id"].as_str().unwrap_or("").to_string();
+            let client_id = data["client_id"].as_str().unwrap_or("");
+
+            println!("🔍 {} buscando sala {}", client_id, room_id);
+
+            let rooms_lock = rooms.lock().await;
+
+            if rooms_lock.contains_key(&room_id) {
+                drop(rooms_lock);
+                println!("✅ Sala {} encontrada", room_id);
+                send_to_client(clients, addr, serde_json::json!({
+                    "type": "ROOM_JOINED",
+                    "room_id": room_id
+                })).await;
+            } else {
+                drop(rooms_lock);
+                println!("❌ Sala {} no encontrada", room_id);
+                send_to_client(clients, addr, serde_json::json!({
+                    "type": "ERROR",
+                    "message": "Sala no encontrada"
+                })).await;
+            }
+        }
+
         // ================= JOIN =================
         "JOIN" => {
 
@@ -344,11 +371,9 @@ async fn process_message(
                         .unwrap_or(false);
 
                     if is_owner {
-                        // si es el dueño, eliminar la sala completa de memoria
                         rooms_lock.remove(&room_id);
                         println!("🗑️ Sala {} eliminada de memoria", room_id);
                     } else {
-                        // si no es el dueño, solo remover al jugador
                         room.players.retain(|p| p.client_id != client_id);
                         println!("👋 Jugador removido de {}", room_id);
                     }
@@ -359,13 +384,11 @@ async fn process_message(
             } // 🔓 lock se suelta aquí
 
             if is_owner {
-                // eliminar sala de MongoDB
                 let _ = rooms_coll.delete_one(
                     doc! { "room_id": &room_id }, None
                 ).await;
                 println!("🗑️ Sala {} eliminada de MongoDB", room_id);
             } else {
-                // avisar a los demás jugadores que alguien salió
                 broadcast_room(&room_id, clients, rooms).await;
             }
         }

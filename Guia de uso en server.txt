@@ -45,7 +45,19 @@ NOTA: main.rs posee el codigo de el servidor, para correrlo usar
 
 Usar el comando dentro de la ruta actual del main.rs
 
+NOTA: Si al hacer "cargo run" sale algo como “port 5000 already in use”, usen este comando para ver qué procesos están usando puertos en el sistema:
+	
+	sudo ss -plnty
 
+Deben buscar en las listas de procesos uno que tenga dichas caracteristicas:
+	- puerto: 5000
+	- proceso: dados-triple
+Cuando lo encuentren, fijense a la derecha y busquen el PID del proceso y lo matan con este comando:
+
+	kill "pid del proceso" PID
+	ejm: kill 3239 PID
+
+Y vuelven a correr "cargo run"
 
 GUIA PARA VER LA DATA GUARDADA DE MONGO:
 
@@ -123,3 +135,18 @@ incluyendo índices
 	db.rooms.find()
 	db.moves.find()
 	
+GUIA PARA CREAR EL APK:
+
+Si necesitan generar el APK del proyecto, entren a la carpeta donde tengan el proyecto:
+
+	cd ruta\de\tu\proyecto\android
+
+Luego ejecuten:
+
+	.\gradlew assembleRelease
+
+El archivo se genera en:
+
+	android\app\build\outputs\apk\release
+
+Nombre del archivo: app-release.apk
