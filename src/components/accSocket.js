@@ -227,7 +227,7 @@ const AccSocket = () => {
       <View style={style_01.container}>
 
         <View style={style_01.header}>
-          <TouchableOpacity onPress={() => setScreen("home")} style={style_01.backButton}>
+          <TouchableOpacity onPress={leaveRoom} style={style_01.buttonLeave}>
             <Text style={style_01.backButtonText}>←</Text>
           </TouchableOpacity>
           <Text style={[style_01.title, { flex: 1 }]}>DADO TRIPLE</Text>
