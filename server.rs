@@ -94,7 +94,10 @@ async fn handle_connection(
     println!("🔌 Conectado: {}", addr);
 
     let mut buffer = [0; 2048];
-    let n = socket.read(&mut buffer).await.unwrap();
+    let n = match socket.read(&mut buffer).await {
+        Ok(n) => n,
+        Err(_) => return,
+};
     let request = String::from_utf8_lossy(&buffer[..n]);
 
     if let Some(key_line) = request.lines().find(|l| l.starts_with("Sec-WebSocket-Key:")) {
