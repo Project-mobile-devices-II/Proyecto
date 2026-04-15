@@ -26,7 +26,6 @@ struct Player {
     score: f64,
     prediction: Option<String>,
     ready: bool,
-    // 🎲 CAMPOS DEL JUEGO
     white_dice: Vec<u8>,
     red_die: u8,
     blue_die: u8,
@@ -45,7 +44,6 @@ struct GameState {
     white_dice: Vec<u8>,
     submissions: HashMap<String, Vec<u8>>,
     round_scores: HashMap<String, f64>,
-    // 🎲 CAMPOS DEL JUEGO
     presentation_order: Vec<String>,
     current_presentation: u8,
 }
@@ -355,7 +353,7 @@ async fn process_message(
                         options,
                     ).await;
                 }
-            }
+            } // 🔓 lock se suelta aquí
 
             broadcast_room(&room_id, clients, rooms).await;
         }
@@ -377,7 +375,7 @@ async fn process_message(
                         println!("🔄 {} ready: {}", p.nick, p.ready);
                     }
                 }
-            }
+            } // 🔓 lock se suelta aquí
 
             broadcast_room(&room_id, clients, rooms).await;
         }
@@ -568,6 +566,7 @@ async fn process_message(
                 let mut rooms_lock = rooms.lock().await;
 
                 if let Some(room) = rooms_lock.get_mut(&room_id) {
+
                     is_owner = room.players.first()
                         .map(|p| p.client_id == client_id)
                         .unwrap_or(false);
@@ -579,11 +578,14 @@ async fn process_message(
                         room.players.retain(|p| p.client_id != client_id);
                         println!("👋 Jugador removido de {}", room_id);
                     }
+
                 } else { return; }
-            }
+            } // 🔓 lock se suelta aquí
 
             if is_owner {
-                let _ = rooms_coll.delete_one(doc! { "room_id": &room_id }, None).await;
+                let _ = rooms_coll.delete_one(
+                    doc! { "room_id": &room_id }, None
+                ).await;
                 println!("🗑️ Sala {} eliminada de MongoDB", room_id);
             } else {
                 broadcast_room(&room_id, clients, rooms).await;
@@ -665,16 +667,15 @@ async fn set_phase(room_id: String, phase: String, clients: Clients, rooms: Room
 }
 
 fn start_presentation_timer(room_id: String, clients: Clients, rooms: Rooms) {
-
     let room_id_c = room_id.clone();
-    let clients_c = clients.clone();
     let rooms_c = rooms.clone();
+    let clients_c = clients.clone();
 
     tokio::spawn(async move {
         tokio::time::sleep(tokio::time::Duration::from_secs(7)).await;
 
         let needs_eval = {
-            let mut rooms_lock = rooms.lock().await;
+            let mut rooms_lock = rooms_c.lock().await;
             if let Some(room) = rooms_lock.get_mut(&room_id_c) {
                 if room.phase == "presenting" {
                     let all_done = room.players.iter().all(|p| p.submitted_combination.is_some());
@@ -692,16 +693,11 @@ fn start_presentation_timer(room_id: String, clients: Clients, rooms: Rooms) {
                             }
                         }
                         true
-                    } else {
-                        false
-                    }
-                } else {
-                    false
-                }
-            } else {
-                false
-            }
-        };
+                    } else { false }
+                } else { false }
+            } else { false }
+        }; // 🔓 mutex se suelta aquí
+
         if needs_eval {
             evaluate_combinations(room_id_c, clients_c, rooms_c).await;
         }
@@ -740,7 +736,6 @@ async fn evaluate_combinations(room_id: String, clients: Clients, rooms: Rooms) 
 
     let points_table = [6.0f64, 3.0, 1.0, 0.0];
 
-    // ===== todo el trabajo con mutex SIN awaits =====
     let (current_pres, _round) = {
         let mut rooms_lock = rooms.lock().await;
         if let Some(room) = rooms_lock.get_mut(&room_id) {
@@ -804,9 +799,8 @@ async fn evaluate_combinations(room_id: String, clients: Clients, rooms: Rooms) 
         } else {
             (0, 0)
         }
-    }; // 🔓 mutex se suelta AQUÍ antes de cualquier await
+    }; // 🔓 mutex se suelta aquí
 
-    // ===== ahora sí podemos hacer awaits =====
     broadcast_room(&room_id, &clients, &rooms).await;
 
     if current_pres < 3 {
@@ -864,9 +858,9 @@ async fn end_round(room_id: String, clients: Clients, rooms: Rooms) {
         println!("🏆 Juego terminado");
     } else {
         tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-        start_round(room_id, clients, rooms).await;
-    });
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            start_round(room_id, clients, rooms).await;
+        });
     }
 }
 
@@ -886,6 +880,7 @@ async fn handle_disconnect(
         let mut empty_rooms = vec![];
 
         for (room_id, room) in rooms_lock.iter_mut() {
+
             let was_owner = room.players.first()
                 .map(|p| p.addr == *addr)
                 .unwrap_or(false);
@@ -912,7 +907,7 @@ async fn handle_disconnect(
             rooms_lock.remove(&room_id);
             println!("🗑️ Sala {} eliminada por quedarse vacía", room_id);
         }
-    }
+    } // 🔓 lock se suelta aquí
 
     if !client_id_found.is_empty() {
         let _ = players_coll.update_one(
@@ -935,18 +930,27 @@ fn generate_code() -> String {
     (0..6).map(|_| chars[rng.gen_range(0..chars.len())] as char).collect()
 }
 
-async fn send_to_client(clients: &Clients, addr: &SocketAddr, msg: serde_json::Value) {
+async fn send_to_client(
+    clients: &Clients,
+    addr: &SocketAddr,
+    msg: serde_json::Value
+) {
     if let Some(tx) = clients.lock().await.get(addr) {
         let _ = tx.send(msg.to_string());
     }
 }
 
 async fn broadcast_room(room_id: &str, clients: &Clients, rooms: &Rooms) {
+
     let rooms_guard = rooms.lock().await;
+
     if let Some(room) = rooms_guard.get(room_id) {
+
         let state = serde_json::to_string(room).unwrap();
         let clients_guard = clients.lock().await;
+
         println!("📡 Broadcast sala {}", room_id);
+
         for p in &room.players {
             println!("➡️ {}", p.addr);
             if let Some(tx) = clients_guard.get(&p.addr) {
@@ -956,17 +960,25 @@ async fn broadcast_room(room_id: &str, clients: &Clients, rooms: &Rooms) {
     }
 }
 
-async fn send_ws_text(writer: &mut OwnedWriteHalf, message: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn send_ws_text(
+    writer: &mut OwnedWriteHalf,
+    message: &str
+) -> Result<(), Box<dyn std::error::Error>> {
+
     let payload = message.as_bytes();
     let len = payload.len();
+
     let mut frame = vec![0x81];
+
     if len <= 125 {
         frame.push(len as u8);
     } else {
         frame.push(126);
         frame.extend_from_slice(&(len as u16).to_be_bytes());
     }
+
     frame.extend_from_slice(payload);
     writer.write_all(&frame).await?;
+
     Ok(())
 }
