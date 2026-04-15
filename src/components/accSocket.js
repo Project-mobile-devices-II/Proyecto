@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { style_01 } from '../styles/style_01';
 import { createWs } from '../../App';
@@ -7,6 +7,7 @@ import { createWs } from '../../App';
 const AccSocket = () => {
 
   const [screen, setScreen] = useState("loading");
+  const [isConnecting, setIsConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
   const [roomId, setRoomId] = useState('');
   const [inputRoom, setInputRoom] = useState('');
@@ -118,17 +119,59 @@ const AccSocket = () => {
     connect();
   }, []);
 
+  // ================= APP STATE (reconexión al volver al frente) =================
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState) => {
+      if (nextAppState === 'active') {
+        console.log("📱 App volvió al frente");
+
+        if (!wsRef.current || wsRef.current.readyState !== 1) {
+          console.log("🔄 Reconectando WS...");
+          setIsConnecting(true);
+          setScreen("loading");
+          setConnected(false);
+
+          const ws = createWs();
+          wsRef.current = ws;
+
+          ws.onopen = () => {
+            console.log("✅ WS RECONECTADO");
+            setConnected(true);
+            setIsConnecting(false);
+            setScreen("home");
+          };
+
+          ws.onclose = (e) => {
+            console.log("❌ WS CERRADO:", e.code, e.reason);
+            setConnected(false);
+          };
+
+          ws.onerror = (err) => {
+            console.log("💥 WS ERROR:", err.message);
+          };
+
+          ws.onmessage = wsRef.current?.onmessage;
+        }
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription.remove();
+  }, []);
+
   // ================= ROOM =================
   const createRoom = () => {
+    if (isConnecting) return;
     console.log("🔥 CLICK CREATE ROOM");
     safeSend({ type: "CREATE_ROOM", client_id: myClientIdRef.current });
-  };
+};
 
   const joinRoom = () => {
+    if (isConnecting) return;
     console.log("🔥 CLICK JOIN ROOM");
     if (!inputRoom) return Alert.alert("Error", "Ingresa código");
     safeSend({ type: "JOIN_ROOM", room_id: inputRoom, client_id: myClientIdRef.current });
-  };
+};
 
   // ================= NICK =================
   const sendNick = () => {
