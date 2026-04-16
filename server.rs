@@ -211,6 +211,34 @@ async fn process_message(
 
     match t {
 
+        // ================= LIST_ROOMS (para el monitor web) =================
+        "LIST_ROOMS" => {
+
+            println!("📋 LIST_ROOMS solicitado por {}", addr);
+
+            let rooms_lock = rooms.lock().await;
+
+            // Construimos la lista con room_id incluido en cada entrada
+            let list: Vec<serde_json::Value> = rooms_lock
+                .iter()
+                .map(|(rid, state)| {
+                    let mut obj = serde_json::to_value(state).unwrap_or(serde_json::json!({}));
+                    // Inyectamos el room_id en el objeto para que el frontend lo tenga
+                    if let Some(map) = obj.as_object_mut() {
+                        map.insert("room_id".to_string(), serde_json::json!(rid));
+                    }
+                    obj
+                })
+                .collect();
+
+            let payload = serde_json::json!({
+                "type": "ROOM_LIST",
+                "rooms": list
+            });
+
+            send_to_client(clients, addr, payload).await;
+        }
+
         // ================= CREATE ROOM =================
         "CREATE_ROOM" => {
 
@@ -294,7 +322,7 @@ async fn process_message(
                         options,
                     ).await;
                 }
-            } // 🔓 lock se suelta aquí
+            }
 
             broadcast_room(&room_id, clients, rooms).await;
         }
@@ -316,7 +344,7 @@ async fn process_message(
                         println!("🔄 {} ready: {}", p.nick, p.ready);
                     }
                 }
-            } // 🔓 lock se suelta aquí
+            }
 
             broadcast_room(&room_id, clients, rooms).await;
         }
@@ -341,11 +369,9 @@ async fn process_message(
                         .unwrap_or(false);
 
                     if is_owner {
-                        // si es el dueño, eliminar la sala completa de memoria
                         rooms_lock.remove(&room_id);
                         println!("🗑️ Sala {} eliminada de memoria", room_id);
                     } else {
-                        // si no es el dueño, solo remover al jugador
                         room.players.retain(|p| p.client_id != client_id);
                         println!("👋 Jugador removido de {}", room_id);
                     }
@@ -353,16 +379,14 @@ async fn process_message(
                 } else {
                     return;
                 }
-            } // 🔓 lock se suelta aquí
+            }
 
             if is_owner {
-                // eliminar sala de MongoDB
                 let _ = rooms_coll.delete_one(
                     doc! { "room_id": &room_id }, None
                 ).await;
                 println!("🗑️ Sala {} eliminada de MongoDB", room_id);
             } else {
-                // avisar a los demás jugadores que alguien salió
                 broadcast_room(&room_id, clients, rooms).await;
             }
         }
