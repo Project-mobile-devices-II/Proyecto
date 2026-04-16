@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dado Triple — Monitor de Salas</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:       #0d0d0d;
+      --bg2:      #161616;
+      --bg3:      #1e1e1e;
+      --border:   rgba(255,255,255,0.08);
+      --border2:  rgba(255,255,255,0.15);
+      --text:     #f0f0f0;
+      --text2:    #888;
+      --text3:    #555;
+      --green:    #4caf7d;
+      --green-bg: rgba(76,175,125,0.12);
+      --purple:   #9b7fe8;
+      --purple-bg:rgba(155,127,232,0.12);
+      --amber:    #f0a030;
+      --amber-bg: rgba(240,160,48,0.12);
+      --red:      #e05555;
+      --red-bg:   rgba(224,85,85,0.12);
+      --blue:     #5b9cf6;
+      --blue-bg:  rgba(91,156,246,0.12);
+    }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    /* ── TOP BAR ── */
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 24px;
+      height: 56px;
+      background: var(--bg2);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: .5px;
+    }
+    .dice-icon {
+      width: 28px; height: 28px;
+      background: var(--purple);
+      border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .conn-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text2);
+      padding: 5px 12px;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+    }
+    .status-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--red);
+      transition: background .3s;
+    }
+    .status-dot.on { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+    /* ── CONFIG BAR ── */
+    .config-bar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--border);
+      background: var(--bg2);
+    }
+    .config-bar input {
+      flex: 1;
+      height: 38px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0 12px;
+      font-size: 13px;
+      color: var(--text);
+      outline: none;
+      transition: border-color .2s;
+    }
+    .config-bar input:focus { border-color: var(--purple); }
+    .btn {
+      height: 38px;
+      padding: 0 18px;
+      border-radius: 8px;
+      border: 1px solid var(--border2);
+      background: transparent;
+      color: var(--text);
+      font-size: 13px;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .btn:hover { background: var(--bg3); }
+    .btn.primary {
+      background: var(--purple);
+      border-color: var(--purple);
+      color: #fff;
+      font-weight: 600;
+    }
+    .btn.primary:hover { opacity: .88; }
+
+    /* ── STATS ROW ── */
+    .stats-row {
+      display: flex;
+      gap: 12px;
+      padding: 16px 24px 0;
+    }
+    .stat-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 18px;
+      min-width: 110px;
+    }
+    .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .6px; }
+    .stat-val   { font-size: 22px; font-weight: 600; margin-top: 2px; }
+
+    /* ── SECTION TITLE ── */
+    .section-title {
+      font-size: 12px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: .8px;
+      font-weight: 600;
+      padding: 20px 24px 10px;
+    }
+
+    /* ── GRID ── */
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 14px;
+      padding: 0 24px 24px;
+    }
+
+    /* ── ROOM CARD ── */
+    .room-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      transition: border-color .2s, transform .15s;
+      position: relative;
+      overflow: hidden;
+    }
+    .room-card::before {
+      content: '';
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      height: 2px;
+      background: var(--purple);
+      opacity: 0;
+      transition: opacity .2s;
+    }
+    .room-card:hover { border-color: var(--border2); transform: translateY(-1px); }
+    .room-card.playing::before { opacity: 1; background: var(--green); }
+    .room-card.playing { border-color: rgba(76,175,125,0.3); }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .room-id {
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: 2px;
+      font-family: 'Courier New', monospace;
+    }
+    .badge {
+      font-size: 10px;
+      font-weight: 600;
+      padding: 3px 9px;
+      border-radius: 20px;
+      letter-spacing: .4px;
+      text-transform: uppercase;
+    }
+    .badge.lobby   { background: var(--blue-bg);   color: var(--blue); }
+    .badge.playing { background: var(--green-bg);  color: var(--green); }
+    .badge.full    { background: var(--amber-bg);  color: var(--amber); }
+
+    /* ── ROUND INDICATOR ── */
+    .round-badge {
+      font-size: 11px;
+      color: var(--text3);
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+    .round-pips {
+      display: flex;
+      gap: 3px;
+    }
+    .pip {
+      width: 8px; height: 8px;
+      border-radius: 2px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+    }
+    .pip.active { background: var(--purple); border-color: var(--purple); }
+
+    /* ── PLAYERS ── */
+    .players-section { margin-bottom: 8px; }
+    .section-micro {
+      font-size: 10px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      margin-bottom: 6px;
+    }
+    .player-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .player-row:last-child { border-bottom: none; }
+    .avatar {
+      width: 28px; height: 28px;
+      border-radius: 50%;
+      background: var(--purple-bg);
+      color: var(--purple);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px;
+      font-weight: 700;
+      flex-shrink: 0;
+      border: 1px solid rgba(155,127,232,0.3);
+    }
+    .avatar.spec {
+      background: var(--bg3);
+      color: var(--text3);
+      border-color: var(--border);
+    }
+    .player-name {
+      font-size: 13px;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .player-score {
+      font-size: 12px;
+      color: var(--amber);
+      font-weight: 600;
+      font-family: monospace;
+    }
+    .ready-indicator {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      flex-shrink: 0;
+    }
+    .ready-indicator.yes { background: var(--green); border-color: var(--green); }
+
+    /* ── SPECTATORS (only shown during play) ── */
+    .spec-section {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border);
+      display: none;
+    }
+    .spec-section.visible { display: block; }
+    .spec-avatars {
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      margin-top: 5px;
+    }
+
+    /* ── CARD FOOTER ── */
+    .card-foot {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text3);
+    }
+
+    /* ── DICE ROW (partida en curso) ── */
+    .dice-row {
+      display: flex;
+      gap: 6px;
+      margin: 10px 0 4px;
+    }
+    .die {
+      width: 32px; height: 32px;
+      background: var(--bg3);
+      border: 1px solid var(--border2);
+      border-radius: 7px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .die.white { color: #fff; border-color: rgba(255,255,255,0.3); }
+
+    /* ── EMPTY ── */
+    .empty-state {
+      grid-column: 1/-1;
+      padding: 60px 0;
+      text-align: center;
+    }
+    .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: .3; }
+    .empty-text { font-size: 14px; color: var(--text3); }
+
+    /* ── LOG ── */
+    .log-wrap {
+      margin: 0 24px 24px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .log-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    .log-title { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: .6px; }
+    .log-clear { font-size: 11px; color: var(--text3); cursor: pointer; }
+    .log-clear:hover { color: var(--text2); }
+    #log {
+      padding: 8px 14px;
+      font-family: 'Courier New', monospace;
+      font-size: 11px;
+      color: var(--text3);
+      max-height: 100px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .log-line { line-height: 1.6; }
+    .log-line.ok  { color: var(--green); }
+    .log-line.err { color: var(--red); }
+    .log-line.info{ color: var(--blue); }
+  </style>
+</head>
+<body>
+
+  <!-- TOP BAR -->
+  <div class="topbar">
+    <div class="logo">
+      <div class="dice-icon">&#9858;</div>
+      Dado Triple
+    </div>
+    <div class="conn-pill">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusLabel">Desconectado</span>
+    </div>
+  </div>
+
+  <!-- CONFIG -->
+  <div class="config-bar">
+    <input id="ipInput" type="text" placeholder="IP de la VM  ej: 192.168.1.100" value="" />
+    <input id="portInput" type="text" placeholder="Puerto" value="5000" style="max-width:90px" />
+    <button class="btn primary" onclick="connect()">Conectar</button>
+    <button class="btn" onclick="disconnect()">Desconectar</button>
+  </div>
+
+  <!-- STATS -->
+  <div class="stats-row">
+    <div class="stat-card">
+      <div class="stat-label">Salas activas</div>
+      <div class="stat-val" id="statRooms">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Jugadores</div>
+      <div class="stat-val" id="statPlayers">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">En partida</div>
+      <div class="stat-val" id="statPlaying">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">En lobby</div>
+      <div class="stat-val" id="statLobby">0</div>
+    </div>
+  </div>
+
+  <!-- ROOMS -->
+  <div class="section-title">Salas</div>
+  <div class="grid" id="roomsGrid">
+    <div class="empty-state">
+      <div class="empty-icon">&#9858;</div>
+      <div class="empty-text">Conecta al servidor para ver las salas</div>
+    </div>
+  </div>
+
+  <!-- LOG -->
+  <div class="log-wrap">
+    <div class="log-head">
+      <span class="log-title">Consola</span>
+      <span class="log-clear" onclick="clearLog()">Limpiar</span>
+    </div>
+    <div id="log"></div>
+  </div>
+
+<script>
+  // ── STATE ──────────────────────────────────────────────
+  let ws = null;
+  let rooms = {};        // room_id → GameState
+  let pollTimer = null;
+
+  const SPECTATOR_CLIENT_ID = 'MONITOR_' + Math.random().toString(36).slice(2, 8).toUpperCase();
+
+  // ── LOGGING ────────────────────────────────────────────
+  function log(msg, type = '') {
+    const el = document.getElementById('log');
+    const line = document.createElement('div');
+    line.className = 'log-line ' + type;
+    const ts = new Date().toLocaleTimeString('es-CR', { hour12: false });
+    line.textContent = '[' + ts + '] ' + msg;
+    el.appendChild(line);
+    el.scrollTop = el.scrollHeight;
+    if (el.children.length > 120) el.removeChild(el.firstChild);
+  }
+  function clearLog() { document.getElementById('log').innerHTML = ''; }
+
+  // ── CONNECTION ─────────────────────────────────────────
+  function connect() {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      log('Ya estás conectado', 'info'); return;
+    }
+    const ip   = document.getElementById('ipInput').value.trim() || '127.0.0.1';
+    const port = document.getElementById('portInput').value.trim() || '5000';
+    const url  = 'ws://' + ip + ':' + port;
+
+    log('Conectando a ' + url + ' ...', 'info');
+
+    try {
+      ws = new WebSocket(url);
+    } catch(e) {
+      log('Error al crear WebSocket: ' + e.message, 'err'); return;
+    }
+
+    ws.onopen = () => {
+      setStatus(true);
+      log('Conectado a ' + url, 'ok');
+      // Solicitamos lista de salas
+      sendMsg({ type: 'LIST_ROOMS', client_id: SPECTATOR_CLIENT_ID });
+      // Poll cada 3 s para mantener actualizado
+      pollTimer = setInterval(() => {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          sendMsg({ type: 'LIST_ROOMS', client_id: SPECTATOR_CLIENT_ID });
+        }
+      }, 3000);
+    };
+
+    ws.onmessage = (evt) => {
+      try {
+        const data = JSON.parse(evt.data);
+        handleMessage(data);
+      } catch(e) {
+        log('JSON inválido: ' + evt.data.slice(0, 80), 'err');
+      }
+    };
+
+    ws.onerror = (e) => {
+      log('Error de WebSocket', 'err');
+      setStatus(false);
+    };
+
+    ws.onclose = () => {
+      setStatus(false);
+      log('Desconectado del servidor', 'err');
+      clearInterval(pollTimer);
+    };
+  }
+
+  function disconnect() {
+    if (ws) { ws.close(); ws = null; }
+    clearInterval(pollTimer);
+    rooms = {};
+    renderRooms();
+    setStatus(false);
+    log('Desconexión manual', 'info');
+  }
+
+  function sendMsg(obj) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(obj));
+    }
+  }
+
+  function setStatus(on) {
+    document.getElementById('statusDot').className  = 'status-dot' + (on ? ' on' : '');
+    document.getElementById('statusLabel').textContent = on ? 'Conectado' : 'Desconectado';
+  }
+
+  // ── MESSAGE HANDLER ────────────────────────────────────
+  function handleMessage(data) {
+    // El server puede mandar GameState directamente (broadcast_room)
+    // o un mensaje con type
+
+    const t = data.type;
+
+    if (t === 'ROOM_LIST') {
+      // Formato esperado: { type:'ROOM_LIST', rooms: [ GameState, ... ] }
+      rooms = {};
+      (data.rooms || []).forEach(r => {
+        if (r.room_id || (r.players && r.players[0])) {
+          const rid = r.room_id || r.players[0].room_id;
+          rooms[rid] = r;
+        }
+      });
+      renderRooms();
+      return;
+    }
+
+    if (t === 'ROOM_CREATED') {
+      log('Sala creada: ' + data.room_id, 'ok'); return;
+    }
+
+    // Si no tiene type, asumimos que es un GameState broadcast
+    if (!t && data.players) {
+      const rid = data.players[0]?.room_id;
+      if (rid) {
+        rooms[rid] = data;
+        log('Actualización sala ' + rid + ' — fase: ' + data.phase, 'info');
+        renderRooms();
+      }
+      return;
+    }
+
+    // GameState con room_id explícito
+    if (data.room_id && data.phase) {
+      rooms[data.room_id] = data;
+      renderRooms();
+      return;
+    }
+
+    log('Msg: ' + JSON.stringify(data).slice(0, 100));
+  }
+
+  // ── DICE FACES ─────────────────────────────────────────
+  const FACES = ['', '⚀', '⚁', '⚂', '⚃', '⚄', '⚅'];
+  function dieFace(n) { return FACES[n] || n; }
+
+  // ── INITIALS ───────────────────────────────────────────
+  function initials(nick) {
+    if (!nick) return '?';
+    const parts = nick.trim().split(' ');
+    return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
+  }
+
+  // ── RENDER ─────────────────────────────────────────────
+  function renderRooms() {
+    const grid = document.getElementById('roomsGrid');
+    const keys = Object.keys(rooms);
+
+    // stats
+    let totalPlayers = 0, playing = 0, lobby = 0;
+    keys.forEach(k => {
+      const r = rooms[k];
+      totalPlayers += r.players ? r.players.length : 0;
+      if (r.phase === 'lobby') lobby++;
+      else playing++;
+    });
+    document.getElementById('statRooms').textContent   = keys.length;
+    document.getElementById('statPlayers').textContent = totalPlayers;
+    document.getElementById('statPlaying').textContent = playing;
+    document.getElementById('statLobby').textContent   = lobby;
+
+    if (keys.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-state">
+          <div class="empty-icon">&#9858;</div>
+          <div class="empty-text">No hay salas activas en este momento</div>
+        </div>`;
+      return;
+    }
+
+    grid.innerHTML = keys.map(rid => renderCard(rooms[rid], rid)).join('');
+  }
+
+  function renderCard(room, rid) {
+    const phase    = room.phase || 'lobby';
+    const isPlay   = phase !== 'lobby';
+    const players  = room.players || [];
+    const round    = room.round || 1;
+    const whiteDice= room.white_dice || [];
+
+    // Separar jugadores reales de espectadores (en tu modelo, todos son players)
+    // Si hay más de 2 jugadores y la partida está en curso, los extras son espectadores
+    const maxActivos = 2;
+    const activePlayers  = isPlay ? players.slice(0, maxActivos) : players;
+    const spectators     = isPlay ? players.slice(maxActivos)    : [];
+
+    // Badge
+    const allReady = players.length > 0 && players.every(p => p.ready);
+    let badgeClass = 'lobby', badgeText = 'Lobby';
+    if (isPlay)    { badgeClass = 'playing'; badgeText = 'En partida'; }
+    else if (allReady) { badgeClass = 'full'; badgeText = 'Listo'; }
+
+    // Round pips (3 rondas)
+    const pips = [1,2,3].map(i =>
+      `<div class="pip ${i <= round ? 'active' : ''}"></div>`
+    ).join('');
+
+    // Players rows
+    const playerRows = activePlayers.map(p => `
+      <div class="player-row">
+        <div class="avatar">${initials(p.nick)}</div>
+        <span class="player-name">${escHtml(p.nick || 'Anon')}</span>
+        ${isPlay ? `<span class="player-score">${p.score ?? 0}pts</span>` : ''}
+        <div class="ready-indicator ${p.ready ? 'yes' : ''}"></div>
+      </div>`
+    ).join('');
+
+    // Dice row (solo en partida)
+    const diceHtml = isPlay && whiteDice.length ? `
+      <div style="margin-bottom:4px">
+        <div class="section-micro">Dados blancos</div>
+        <div class="dice-row">
+          ${whiteDice.map(d => `<div class="die white">${dieFace(d)}</div>`).join('')}
+        </div>
+      </div>` : '';
+
+    // Spectators (solo visibles si están en partida)
+    const specHtml = spectators.length ? `
+      <div class="spec-section ${isPlay ? 'visible' : ''}">
+        <div class="section-micro">Espectadores (${spectators.length})</div>
+        <div class="spec-avatars">
+          ${spectators.map(s => `
+            <div class="avatar spec" title="${escHtml(s.nick)}">${initials(s.nick)}</div>
+          `).join('')}
+        </div>
+      </div>` : '';
+
+    return `
+      <div class="room-card ${isPlay ? 'playing' : ''}">
+        <div class="card-head">
+          <span class="room-id">${escHtml(rid)}</span>
+          <span class="badge ${badgeClass}">${badgeText}</span>
+        </div>
+
+        <div class="round-badge">
+          Ronda <strong style="color:var(--text);margin:0 4px">${round}</strong>/3
+          <div class="round-pips">${pips}</div>
+        </div>
+
+        ${diceHtml}
+
+        <div class="players-section">
+          <div class="section-micro">Jugadores (${activePlayers.length})</div>
+          ${playerRows || '<div style="font-size:12px;color:var(--text3);padding:4px 0">Sin jugadores</div>'}
+        </div>
+
+        ${specHtml}
+
+        <div class="card-foot">
+          <span>Fase: ${phase}</span>
+          <span>${players.length} persona${players.length !== 1 ? 's' : ''}</span>
+        </div>
+      </div>`;
+  }
+
+  function escHtml(s) {
+    return String(s)
+      .replace(/&/g,'&amp;')
+      .replace(/</g,'&lt;')
+      .replace(/>/g,'&gt;')
+      .replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>
