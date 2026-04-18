@@ -1,10 +1,5 @@
-<<<<<<< Updated upstream
-import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator } from 'react-native';
-=======
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, AppState, BackHandler, Modal } from 'react-native';
->>>>>>> Stashed changes
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { style_01 } from '../styles/style_01';
 import { createWs } from '../../App';
@@ -78,162 +73,12 @@ const AccSocket = () => {
     wsRef.current.send(JSON.stringify(data));
   };
 
-<<<<<<< Updated upstream
-  // ================= INIT =================
-  useEffect(() => {
-    const connect = async () => {
-      let cid = await AsyncStorage.getItem('client_id');
-      if (!cid) {
-        cid = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
-        await AsyncStorage.setItem('client_id', cid);
-        console.log("🆕 NUEVO CID:", cid);
-      } else {
-        console.log("♻️ CID EXISTENTE:", cid);
-      }
-
-      myClientIdRef.current = cid;
-
-      const ws = createWs();
-      wsRef.current = ws;
-
-      console.log("🔌 Intentando conectar WS...");
-
-      ws.onopen = () => {
-        console.log("✅ WS CONECTADO");
-        setConnected(true);
-        setScreen("home");
-      };
-
-      ws.onclose = (e) => {
-        console.log("❌ WS CERRADO:", e.code, e.reason);
-        setConnected(false);
-      };
-
-      ws.onerror = (err) => {
-        console.log("💥 WS ERROR:", err.message);
-      };
-
-      ws.onmessage = (e) => {
-        console.log("📩 RECIBIDO RAW:", e.data);
-        try {
-          const data = JSON.parse(e.data);
-          console.log("📦 TIPO:", data.type || "SIN TYPE");
-
-          if (data.type === "ROOM_CREATED") {
-            console.log("🏠 ROOM CREATED:", data.room_id);
-            setRoomId(data.room_id);
-            setScreen("nick");
-            return;
-          }
-
-          if (data.type === "ROOM_JOINED") {
-            console.log("🚪 ROOM JOINED:", data.room_id);
-            setRoomId(data.room_id);
-            setScreen("nick");
-            return;
-          }
-
-          if (data.type === "ERROR") {
-            console.log("⚠️ ERROR SERVER:", data.message);
-            Alert.alert("Error", data.message);
-            return;
-          }
-
-          if (data.players) {
-            console.log("👥 PLAYERS RECIBIDOS:", JSON.stringify(data.players));
-            console.log("🔍 MI CID:", myClientIdRef.current);
-            console.log("📊 FASE:", data.phase);
-
-            setGameState(data);
-            setWhiteDice(data.white_dice || []);
-
-            const hasMe = data.players.some(p => p.client_id === myClientIdRef.current);
-            console.log("✅ HASME:", hasMe);
-
-            if (hasMe) {
-              const nextScreen = data.phase === "lobby" ? "lobby" : "game";
-              console.log("➡️ CAMBIANDO A PANTALLA:", nextScreen);
-              setScreen(nextScreen);
-            } else {
-              console.log("❌ NO ME ENCONTRÉ EN LA LISTA DE JUGADORES");
-            }
-          }
-
-        } catch (err) {
-          console.log("❌ PARSE ERROR:", err);
-        }
-      };
-    };
-
-    connect();
-  }, []);
-
-  // ================= ROOM =================
-  const createRoom = () => {
-    console.log("🔥 CLICK CREATE ROOM");
-    safeSend({ type: "CREATE_ROOM", client_id: myClientIdRef.current });
-  };
-
-  const joinRoom = () => {
-    console.log("🔥 CLICK JOIN ROOM");
-    if (!inputRoom) return Alert.alert("Error", "Ingresa código");
-    safeSend({ type: "JOIN_ROOM", room_id: inputRoom, client_id: myClientIdRef.current });
-  };
-
-  // ================= NICK =================
-  const sendNick = () => {
-    console.log("🔥 CLICK ENTRAR");
-    console.log("📋 CID:", myClientIdRef.current);
-    console.log("📋 ROOM:", roomId);
-    console.log("📋 NICK:", nick);
-    if (!nick) return Alert.alert("Error", "Ingresa nombre");
-    safeSend({ type: "JOIN", nick, client_id: myClientIdRef.current, room_id: roomId });
-  };
-
-  // ================= GAME =================
-  const toggleReady = () => {
-    safeSend({ type: "READY", room_id: roomId, client_id: myClientIdRef.current });
-  };
-
-  const leaveRoom = () => {
-    Alert.alert(
-      "Salir de la sala",
-      "¿Seguro que quieres salir?",
-      [
-        { text: "Cancelar", style: "cancel" },
-        {
-          text: "Salir",
-          style: "destructive",
-          onPress: () => {
-            safeSend({ type: "LEAVE_ROOM", room_id: roomId, client_id: myClientIdRef.current });
-            setRoomId('');
-            setNick('');
-            setGameState({ phase: 'lobby', players: [] });
-            setScreen("home");
-          }
-        }
-      ]
-    );
-  };
-
-  const selectPrediction = (p) => {
-    setPrediction(p);
-    safeSend({ type: "PREDICTION", value: p, room_id: roomId, client_id: myClientIdRef.current });
-  };
-
-  const toggleDie = (i) => {
-    if (selectedDice.includes(i)) {
-      setSelectedDice(selectedDice.filter(x => x !== i));
-    } else if (selectedDice.length < 3) {
-      setSelectedDice([...selectedDice, i]);
-=======
   // ================= CONECTAR WS =================
   const connectWs = async () => {
     let cid = await AsyncStorage.getItem('client_id');
     if (!cid) {
       cid = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
       await AsyncStorage.setItem('client_id', cid);
->>>>>>> Stashed changes
     }
     myClientIdRef.current = cid;
 
