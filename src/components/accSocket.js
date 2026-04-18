@@ -23,7 +23,6 @@ const AccSocket = () => {
   const [screen, setScreen] = useState("loading");
   const [isConnecting, setIsConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
   const [roomId, setRoomId] = useState('');
   const [inputRoom, setInputRoom] = useState('');
   const [nick, setNick] = useState('');
