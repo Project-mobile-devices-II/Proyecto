@@ -46,7 +46,7 @@ const AccSocket = () => {
   const countdownRef = useRef(null);
 
   // ================= COUNTDOWN =================
-  const startCountdown = (seconds = 10) => {
+  const startCountdown = (seconds = 20) => {
     if (countdownRef.current) clearInterval(countdownRef.current);
     setCountdown(seconds);
     countdownRef.current = setInterval(() => {
@@ -106,21 +106,25 @@ const AccSocket = () => {
           const newPhase = data.phase;
           const newTurn = data.current_turn;
 
+          // ── FIX COUNTDOWN: solo reiniciar si cambia la fase o el turno ──
           setGameState(prev => {
-            // si cambia el turno o la fase, resetear selección
-            if (prev.current_turn !== newTurn || prev.phase !== newPhase) {
+            const phaseChanged = prev.phase !== newPhase;
+            const turnChanged = prev.current_turn !== newTurn;
+
+            if (phaseChanged || turnChanged) {
               setSelectedDice([]);
               setUseRed(false);
               setUseBlue(false);
+
+              if (newPhase === "rolling" || newPhase === "presenting") {
+                startCountdown(20);
+              } else {
+                stopCountdown();
+              }
             }
+
             return data;
           });
-
-          if (newPhase === "rolling" || newPhase === "presenting") {
-            startCountdown(10);
-          } else {
-            stopCountdown();
-          }
 
           const hasMe = data.players.some(p => p.client_id === myClientIdRef.current);
           if (hasMe) {
