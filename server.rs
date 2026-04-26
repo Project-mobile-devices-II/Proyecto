@@ -801,9 +801,11 @@ fn start_presentation_timer(room_id: String, clients: Clients, rooms: Rooms, spe
         if needs_eval {
             evaluate_combinations(room_id_c, clients_c, rooms_c, spectators_c).await;
         } else {
-            let phase = {
+            let (phase, timer_id) = {
                 let rooms_lock = rooms_c.lock().await;
-                rooms_lock.get(&room_id_c).map(|r| r.phase.clone()).unwrap_or_default()
+                rooms_lock.get(&room_id_c)
+                    .map(|r| (r.phase.clone(), r.timer_id))
+                    .unwrap_or_default()
             };
             if phase == "presenting" {
                 start_presentation_timer(room_id_c, clients_c, rooms_c, spectators_c);
