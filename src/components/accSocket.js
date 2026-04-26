@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, AppState, BackHandler, Modal } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { style_01 } from '../styles/style_01';
@@ -18,6 +18,50 @@ const REGLAS = [
   "⏱️ Tienes 10 segundos por turno.",
 ];
 
+// ── FIX PARPADEO: componentes fuera del render principal ──
+const RulesModal = memo(({ visible, onClose }) => (
+  <Modal visible={visible} transparent animationType="fade">
+    <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', padding: 20 }}>
+      <View style={{ backgroundColor: '#1a1a1a', borderRadius: 12, padding: 20, borderColor: '#ff3333', borderWidth: 1 }}>
+        <Text style={{ color: '#ff3333', fontSize: 18, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' }}>📋 REGLAS</Text>
+        <ScrollView style={{ maxHeight: 400 }}>
+          {REGLAS.map((r, i) => (
+            <Text key={i} style={{ color: '#fff', fontSize: 13, marginBottom: 8, lineHeight: 20 }}>{r}</Text>
+          ))}
+        </ScrollView>
+        <TouchableOpacity onPress={onClose} style={{ backgroundColor: '#ff3333', borderRadius: 8, padding: 12, marginTop: 12 }}>
+          <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>CERRAR</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </Modal>
+));
+
+const RulesButton = memo(({ onPress }) => (
+  <TouchableOpacity
+    onPress={onPress}
+    style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#ff3333', justifyContent: 'center', alignItems: 'center' }}
+  >
+    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>?</Text>
+  </TouchableOpacity>
+));
+
+const CountdownDisplay = memo(({ countdown }) => (
+  <View style={{ alignItems: 'center', marginVertical: 8 }}>
+    <Text style={{ fontSize: 36, fontWeight: 'bold', color: countdown <= 5 ? '#ff3333' : '#ffffff' }}>
+      {countdown}
+    </Text>
+  </View>
+));
+
+const TurnDisplay = memo(({ myTurn, nickTurn }) => (
+  <View style={{ backgroundColor: myTurn ? '#ff3333' : '#222', borderRadius: 8, padding: 10, marginVertical: 8, alignItems: 'center' }}>
+    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>
+      {myTurn ? '⭐ Es tu turno' : `⏳ ${nickTurn} está jugando...`}
+    </Text>
+  </View>
+));
+
 const AccSocket = () => {
 
   const [screen, setScreen] = useState("loading");
@@ -26,6 +70,8 @@ const AccSocket = () => {
   const [roomId, setRoomId] = useState('');
   const [inputRoom, setInputRoom] = useState('');
   const [nick, setNick] = useState('');
+  // ── FIX 4: pendingAction guarda si el usuario quiere crear o unirse ──
+  const [pendingAction, setPendingAction] = useState(null); // 'create' | 'join'
   const [gameState, setGameState] = useState({
     phase: 'lobby',
     players: [],
@@ -48,16 +94,9 @@ const AccSocket = () => {
   const lastTimerIdRef = useRef(0);
   const gameStateRef = useRef(gameState);
   const roomIdRef = useRef(roomId);
-  const selectedDiceRef = useRef(selectedDice);
-  const useRedRef = useRef(useRed);
-  const useBlueRef = useRef(useBlue);
 
-  // mantener refs actualizados
   useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
-  useEffect(() => { selectedDiceRef.current = selectedDice; }, [selectedDice]);
-  useEffect(() => { useRedRef.current = useRed; }, [useRed]);
-  useEffect(() => { useBlueRef.current = useBlue; }, [useBlue]);
 
   // ================= COUNTDOWN =================
   const startCountdown = useCallback((seconds = 10) => {
@@ -83,29 +122,23 @@ const AccSocket = () => {
     const state = gameStateRef.current;
     const myId = myClientIdRef.current;
     const rid = roomIdRef.current;
-
     if (!myId || !rid) return;
     if (state.current_turn !== myId) return;
 
     if (state.phase === "rolling") {
       const me = state.players.find(p => p.client_id === myId);
       if (me && me.white_dice.length === 0) {
-        console.log("⏱️ Auto-roll por timeout");
         safeSendDirect({ type: "ROLL_DICE", room_id: rid, client_id: myId });
       }
     }
-
     if (state.phase === "presenting") {
       const me = state.players.find(p => p.client_id === myId);
       if (me && !me.submitted_combination) {
-        // auto-submit los primeros 3 dados disponibles
         const available = me.remaining_dice;
         if (available.length >= 3) {
-          const dice = [available[0], available[1], available[2]];
-          console.log("Auto-submit por timeout:", dice);
           safeSendDirect({
             type: "SUBMIT_COMBINATION",
-            dice,
+            dice: [available[0], available[1], available[2]],
             use_red: false,
             use_blue: false,
             room_id: rid,
@@ -116,13 +149,11 @@ const AccSocket = () => {
     }
   };
 
-  // safeSend directo sin closure
   const safeSendDirect = (data) => {
     if (!wsRef.current || wsRef.current.readyState !== 1) return;
     wsRef.current.send(JSON.stringify(data));
   };
 
-  // ================= SAFE SEND =================
   const safeSend = (data) => {
     if (!wsRef.current || wsRef.current.readyState !== 1) {
       Alert.alert("Error", "Conexión cerrada");
@@ -140,6 +171,10 @@ const AccSocket = () => {
     }
     myClientIdRef.current = cid;
 
+    // ── FIX 1: cargar nick guardado ──
+    const savedNick = await AsyncStorage.getItem('player_nick');
+    if (savedNick) setNick(savedNick);
+
     const ws = createWs();
     wsRef.current = ws;
 
@@ -156,8 +191,29 @@ const AccSocket = () => {
       try {
         const data = JSON.parse(e.data);
 
-        if (data.type === "ROOM_CREATED") { setRoomId(data.room_id); setScreen("nick"); return; }
-        if (data.type === "ROOM_JOINED") { setRoomId(data.room_id); setScreen("nick"); return; }
+        if (data.type === "ROOM_CREATED") {
+          const savedRoomId = data.room_id;
+          setRoomId(savedRoomId);
+          // mandar JOIN automáticamente con el nick ya escrito
+          if (pendingNickRef.current) {
+            safeSendDirect({
+              type: "JOIN",
+              nick: pendingNickRef.current,
+              client_id: myClientIdRef.current,
+              room_id: savedRoomId
+            });
+            pendingNickRef.current = '';
+          }
+          setPendingAction(null);
+          return;
+        }
+
+        if (data.type === "ROOM_JOINED") {
+          setRoomId(data.room_id);
+          setScreen("nick");
+          return;
+        }
+
         if (data.type === "ERROR") { Alert.alert("Error", data.message); return; }
 
         if (data.players) {
@@ -176,14 +232,12 @@ const AccSocket = () => {
               setSelectedDice([]);
               setUseRed(false);
               setUseBlue(false);
-
               if ((newPhase === "rolling" || newPhase === "presenting") && newTurn === myClientIdRef.current) {
                 startCountdown(10);
               } else {
                 stopCountdown();
               }
             }
-
             return data;
           });
 
@@ -199,10 +253,8 @@ const AccSocket = () => {
     };
   };
 
-  // ================= INIT =================
   useEffect(() => { connectWs(); return () => stopCountdown(); }, []);
 
-  // ================= APP STATE (reconexión) =================
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'active' && (!wsRef.current || wsRef.current.readyState !== 1)) {
@@ -213,7 +265,6 @@ const AccSocket = () => {
     return () => sub.remove();
   }, []);
 
-  // ================= APP STATE (background) =================
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       if (next === 'background' || next === 'inactive') {
@@ -227,11 +278,11 @@ const AccSocket = () => {
         }
         setConnected(false);
         setRoomId('');
-        setNick('');
         setScreen("home");
         setSelectedDice([]);
         setUseRed(false);
         setUseBlue(false);
+        setPendingAction(null);
         lastTimerIdRef.current = 0;
         setGameState({ phase: 'lobby', players: [], round: 1, presentation_order: [], current_presentation: 0, round_scores: {}, current_turn: '', timer_id: 0 });
       }
@@ -246,8 +297,10 @@ const AccSocket = () => {
       {
         text: "Salir", style: "destructive",
         onPress: () => {
-          safeSend({ type: "LEAVE_ROOM", room_id: roomId, client_id: myClientIdRef.current });
-          setRoomId(''); setNick(''); setSelectedDice([]); setUseRed(false); setUseBlue(false);
+          if (roomId) safeSend({ type: "LEAVE_ROOM", room_id: roomId, client_id: myClientIdRef.current });
+          setRoomId('');
+          setSelectedDice([]); setUseRed(false); setUseBlue(false);
+          setPendingAction(null);
           lastTimerIdRef.current = 0;
           setGameState({ phase: 'lobby', players: [], round: 1, presentation_order: [], current_presentation: 0, round_scores: {}, current_turn: '', timer_id: 0 });
           setScreen("home");
@@ -272,15 +325,54 @@ const AccSocket = () => {
   const getCurrentTurnNick = () => gameState.players.find(p => p.client_id === gameState.current_turn)?.nick || '';
 
   // ================= ACCIONES =================
-  const createRoom = () => { if (!isConnecting) safeSend({ type: "CREATE_ROOM", client_id: myClientIdRef.current }); };
-  const joinRoom = () => { if (!isConnecting) { if (!inputRoom) return Alert.alert("Error", "Ingresa código"); safeSend({ type: "JOIN_ROOM", room_id: inputRoom, client_id: myClientIdRef.current }); } };
-  const sendNick = () => { if (!nick) return Alert.alert("Error", "Ingresa nombre"); safeSend({ type: "JOIN", nick, client_id: myClientIdRef.current, room_id: roomId }); };
+
+  // ── FIX 4: crear sala solo guarda la intención, no manda nada al server aún ──
+  const createRoom = () => {
+    if (!isConnecting) {
+      setPendingAction('create');
+      setScreen("nick");
+    }
+  };
+
+  const joinRoom = () => {
+    if (!isConnecting) {
+      if (!inputRoom) return Alert.alert("Error", "Ingresa código");
+      setPendingAction('join');
+      safeSend({ type: "JOIN_ROOM", room_id: inputRoom.toUpperCase(), client_id: myClientIdRef.current });
+    }
+  };
+
+  // ── FIX 1+4: al presionar Entrar, guarda el nick y ejecuta la acción pendiente ──
+  const sendNick = async () => {
+    if (!nick.trim()) return Alert.alert("Error", "Ingresa nombre");
+
+    // guardar nick localmente
+    await AsyncStorage.setItem('player_nick', nick.trim());
+
+    if (pendingAction === 'create') {
+      // FIX 4: ahora sí crear la sala con el nick ya listo
+      safeSend({ type: "CREATE_ROOM", client_id: myClientIdRef.current });
+      // cuando llegue ROOM_CREATED, mandamos JOIN automáticamente
+      // guardamos nick en ref para usarlo en onmessage
+      pendingNickRef.current = nick.trim();
+    } else {
+      // unirse a sala existente
+      safeSend({ type: "JOIN", nick: nick.trim(), client_id: myClientIdRef.current, room_id: roomId });
+      setPendingAction(null);
+    }
+  };
+
+  const pendingNickRef = useRef('');
+
+  // ── FIX 4: cuando llega ROOM_CREATED con pendingNick, mandar JOIN automático ──
+  // modificamos el onmessage para manejar esto
+  // (esto se hace dentro del connectWs, ver abajo el bloque ROOM_CREATED actualizado)
+
   const toggleReady = () => safeSend({ type: "READY", room_id: roomId, client_id: myClientIdRef.current });
   const rollDice = () => safeSend({ type: "ROLL_DICE", room_id: roomId, client_id: myClientIdRef.current });
   const submitPrediction = (p) => safeSend({ type: "SUBMIT_PREDICTION", prediction: p, room_id: roomId, client_id: myClientIdRef.current });
   const returnToLobby = () => safeSend({ type: "RETURN_TO_LOBBY", room_id: roomId, client_id: myClientIdRef.current });
 
-  // ================= SELECCIÓN DE DADOS =================
   const toggleDie = (index) => {
     setSelectedDice(prev => {
       if (prev.includes(index)) return prev.filter(i => i !== index);
@@ -294,64 +386,16 @@ const AccSocket = () => {
   const confirmCombination = () => {
     const me = getMe();
     if (!me) return;
-    const total = totalSelected();
-    if (total !== 3) return Alert.alert("Error", "Selecciona exactamente 3 dados en total");
-
+    if (totalSelected() !== 3) return Alert.alert("Error", "Selecciona exactamente 3 dados en total");
     const dice = selectedDice.map(i => me.remaining_dice[i]);
     if (useRed) dice.push(me.red_die);
     if (useBlue) dice.push(me.blue_die);
-
     if (dice.length !== 3) return Alert.alert("Error", "Selecciona exactamente 3 dados");
-
     safeSend({ type: "SUBMIT_COMBINATION", dice, use_red: useRed, use_blue: useBlue, room_id: roomId, client_id: myClientIdRef.current });
     setSelectedDice([]);
     setUseRed(false);
     setUseBlue(false);
   };
-
-  // ================= MODAL REGLAS =================
-  const RulesModal = () => (
-    <Modal visible={showRules} transparent animationType="fade">
-      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', padding: 20 }}>
-        <View style={{ backgroundColor: '#1a1a1a', borderRadius: 12, padding: 20, borderColor: '#ff3333', borderWidth: 1 }}>
-          <Text style={{ color: '#ff3333', fontSize: 18, fontWeight: 'bold', marginBottom: 16, textAlign: 'center' }}>📋 REGLAS</Text>
-          <ScrollView style={{ maxHeight: 400 }}>
-            {REGLAS.map((r, i) => (
-              <Text key={i} style={{ color: '#fff', fontSize: 13, marginBottom: 8, lineHeight: 20 }}>{r}</Text>
-            ))}
-          </ScrollView>
-          <TouchableOpacity onPress={() => setShowRules(false)} style={{ backgroundColor: '#ff3333', borderRadius: 8, padding: 12, marginTop: 12 }}>
-            <Text style={{ color: '#fff', fontWeight: 'bold', textAlign: 'center' }}>CERRAR</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const RulesButton = () => (
-    <TouchableOpacity
-      onPress={() => setShowRules(true)}
-      style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: '#ff3333', justifyContent: 'center', alignItems: 'center' }}
-    >
-      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>?</Text>
-    </TouchableOpacity>
-  );
-
-  const CountdownDisplay = () => (
-    <View style={{ alignItems: 'center', marginVertical: 8 }}>
-      <Text style={{ fontSize: 36, fontWeight: 'bold', color: countdown <= 5 ? '#ff3333' : '#ffffff' }}>
-        {countdown}
-      </Text>
-    </View>
-  );
-
-  const TurnDisplay = () => (
-    <View style={{ backgroundColor: isMyTurn() ? '#ff3333' : '#222', borderRadius: 8, padding: 10, marginVertical: 8, alignItems: 'center' }}>
-      <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 15 }}>
-        {isMyTurn() ? '⭐ Es tu turno' : `⏳ ${getCurrentTurnNick()} está jugando...`}
-      </Text>
-    </View>
-  );
 
   // ================= UI =================
   if (!connected || screen === "loading") {
@@ -366,7 +410,14 @@ const AccSocket = () => {
         <TouchableOpacity onPress={createRoom} style={style_01.button}>
           <Text style={style_01.buttonText}>CREAR SALA</Text>
         </TouchableOpacity>
-        <TextInput placeholder="Código sala" placeholderTextColor="#aaa" value={inputRoom} onChangeText={setInputRoom} style={style_01.input} autoCapitalize="characters" />
+        <TextInput
+          placeholder="Código sala"
+          placeholderTextColor="#aaa"
+          value={inputRoom}
+          onChangeText={t => setInputRoom(t.toUpperCase())}
+          style={style_01.input}
+          autoCapitalize="characters"
+        />
         <TouchableOpacity onPress={joinRoom} style={style_01.button}>
           <Text style={style_01.buttonText}>UNIRSE</Text>
         </TouchableOpacity>
@@ -385,7 +436,16 @@ const AccSocket = () => {
           <Text style={[style_01.title, { flex: 1 }]}>DADO TRIPLE</Text>
           <View style={style_01.headerSpacer} />
         </View>
-        <TextInput placeholder="Tu nombre" placeholderTextColor="#aaa" value={nick} onChangeText={setNick} style={style_01.input} />
+        <Text style={{ color: '#aaa', textAlign: 'center', marginBottom: 8 }}>
+          {pendingAction === 'create' ? 'Ingresa tu nombre para crear la sala' : 'Ingresa tu nombre para unirte'}
+        </Text>
+        <TextInput
+          placeholder="Tu nombre"
+          placeholderTextColor="#aaa"
+          value={nick}
+          onChangeText={setNick}
+          style={style_01.input}
+        />
         <TouchableOpacity onPress={sendNick} style={style_01.button}>
           <Text style={style_01.buttonText}>ENTRAR</Text>
         </TouchableOpacity>
@@ -402,13 +462,13 @@ const AccSocket = () => {
 
     return (
       <View style={style_01.container}>
-        <RulesModal />
+        <RulesModal visible={showRules} onClose={() => setShowRules(false)} />
         <View style={style_01.header}>
-          <TouchableOpacity onPress={() => setScreen("nick")} style={style_01.backButton}>
+          <TouchableOpacity onPress={leaveRoom} style={style_01.backButton}>
             <Text style={style_01.backButtonText}>←</Text>
           </TouchableOpacity>
           <Text style={[style_01.title, { flex: 1 }]}>DADO TRIPLE</Text>
-          <RulesButton />
+          <RulesButton onPress={() => setShowRules(true)} />
         </View>
 
         <Text style={style_01.screenSubtitle}>Sala de espera</Text>
@@ -488,11 +548,11 @@ const AccSocket = () => {
 
     return (
       <ScrollView style={style_01.container}>
-        <RulesModal />
+        <RulesModal visible={showRules} onClose={() => setShowRules(false)} />
 
         <View style={style_01.header}>
           <Text style={[style_01.title, { flex: 1 }]}>🎲 DADO TRIPLE</Text>
-          <RulesButton />
+          <RulesButton onPress={() => setShowRules(true)} />
         </View>
 
         <Text style={style_01.screenSubtitle}>Ronda {gameState.round} • {phase.toUpperCase()}</Text>
@@ -500,8 +560,8 @@ const AccSocket = () => {
         {/* ===== ROLLING ===== */}
         {phase === "rolling" && (
           <View style={style_01.diceContainer}>
-            <TurnDisplay />
-            {myTurn && <CountdownDisplay />}
+            <TurnDisplay myTurn={myTurn} nickTurn={getCurrentTurnNick()} />
+            {myTurn && <CountdownDisplay countdown={countdown} />}
 
             {myTurn ? (
               me?.white_dice?.length > 0 ? (
@@ -579,26 +639,22 @@ const AccSocket = () => {
         {phase === "presenting" && (
           <View style={style_01.diceContainer}>
             <Text style={style_01.sectionLabel}>PRESENTACIÓN {gameState.current_presentation + 1} DE 3</Text>
-            <TurnDisplay />
-            {myTurn && !me?.submitted_combination && <CountdownDisplay />}
+            <TurnDisplay myTurn={myTurn} nickTurn={getCurrentTurnNick()} />
+            {myTurn && !me?.submitted_combination && <CountdownDisplay countdown={countdown} />}
 
             {myTurn ? (
               me?.submitted_combination ? (
                 <Text style={style_01.statusTextSuccess}>✅ Combinación enviada — esperando a los demás</Text>
               ) : (
                 <>
-                  <Text style={{ color: '#aaa', marginBottom: 8 }}>
-                    Seleccionados: {totalSelected()}/3
-                  </Text>
+                  <Text style={{ color: '#aaa', marginBottom: 8 }}>Seleccionados: {totalSelected()}/3</Text>
 
                   <Text style={style_01.sectionLabel}>DADOS BLANCOS</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 }}>
                     {me?.remaining_dice?.map((d, i) => {
                       const selected = selectedDice.includes(i);
                       return (
-                        <TouchableOpacity
-                          key={i}
-                          onPress={() => toggleDie(i)}
+                        <TouchableOpacity key={i} onPress={() => toggleDie(i)}
                           style={{
                             width: 48, height: 48, margin: 4, borderRadius: 8,
                             backgroundColor: selected ? '#ff3333' : '#333',
@@ -617,42 +673,22 @@ const AccSocket = () => {
                   <View style={{ flexDirection: 'row', marginBottom: 16 }}>
                     <TouchableOpacity
                       onPress={() => { if (useRed || totalSelected() < 3) setUseRed(!useRed); }}
-                      style={{
-                        flex: 1, marginRight: 8, padding: 12, borderRadius: 8,
-                        backgroundColor: useRed ? '#cc0000' : '#333',
-                        borderWidth: 2, borderColor: useRed ? '#ff4444' : '#555',
-                        alignItems: 'center',
-                      }}
+                      style={{ flex: 1, marginRight: 8, padding: 12, borderRadius: 8, backgroundColor: useRed ? '#cc0000' : '#333', borderWidth: 2, borderColor: useRed ? '#ff4444' : '#555', alignItems: 'center' }}
                     >
                       <Text style={{ color: '#fff', fontWeight: 'bold' }}>🔴 ROJO</Text>
-                      <Text style={{ color: useRed ? '#fff' : '#888', fontSize: 12, marginTop: 4 }}>
-                        {useRed ? `Valor: ${me?.red_die}` : 'Oculto'}
-                      </Text>
+                      <Text style={{ color: useRed ? '#fff' : '#888', fontSize: 12, marginTop: 4 }}>{useRed ? `Valor: ${me?.red_die}` : 'Oculto'}</Text>
                     </TouchableOpacity>
-
                     <TouchableOpacity
                       onPress={() => { if (useBlue || totalSelected() < 3) setUseBlue(!useBlue); }}
-                      style={{
-                        flex: 1, marginLeft: 8, padding: 12, borderRadius: 8,
-                        backgroundColor: useBlue ? '#0044cc' : '#333',
-                        borderWidth: 2, borderColor: useBlue ? '#4488ff' : '#555',
-                        alignItems: 'center',
-                      }}
+                      style={{ flex: 1, marginLeft: 8, padding: 12, borderRadius: 8, backgroundColor: useBlue ? '#0044cc' : '#333', borderWidth: 2, borderColor: useBlue ? '#4488ff' : '#555', alignItems: 'center' }}
                     >
                       <Text style={{ color: '#fff', fontWeight: 'bold' }}>🔵 AZUL</Text>
-                      <Text style={{ color: useBlue ? '#fff' : '#888', fontSize: 12, marginTop: 4 }}>
-                        {useBlue ? `Valor: ${me?.blue_die}` : 'Oculto'}
-                      </Text>
+                      <Text style={{ color: useBlue ? '#fff' : '#888', fontSize: 12, marginTop: 4 }}>{useBlue ? `Valor: ${me?.blue_die}` : 'Oculto'}</Text>
                     </TouchableOpacity>
                   </View>
 
-                  <TouchableOpacity
-                    onPress={confirmCombination}
-                    disabled={totalSelected() !== 3}
-                    style={{
-                      backgroundColor: totalSelected() === 3 ? '#ff3333' : '#555',
-                      padding: 14, borderRadius: 8, alignItems: 'center',
-                    }}
+                  <TouchableOpacity onPress={confirmCombination} disabled={totalSelected() !== 3}
+                    style={{ backgroundColor: totalSelected() === 3 ? '#ff3333' : '#555', padding: 14, borderRadius: 8, alignItems: 'center' }}
                   >
                     <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>
                       {totalSelected() === 3 ? 'CONFIRMAR COMBINACIÓN' : `Selecciona ${3 - totalSelected()} más`}
@@ -662,11 +698,10 @@ const AccSocket = () => {
               )
             ) : (
               <View style={{ alignItems: 'center' }}>
-                {me?.submitted_combination ? (
-                  <Text style={style_01.statusTextSuccess}>✅ Ya enviaste tu combinación</Text>
-                ) : (
-                  <Text style={style_01.statusText}>Esperando tu turno...</Text>
-                )}
+                {me?.submitted_combination
+                  ? <Text style={style_01.statusTextSuccess}>✅ Ya enviaste tu combinación</Text>
+                  : <Text style={style_01.statusText}>Esperando tu turno...</Text>
+                }
               </View>
             )}
 

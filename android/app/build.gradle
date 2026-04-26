@@ -15,9 +15,9 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace "com.Dados-Triples"
+    namespace "com.mobilegame"
     defaultConfig {
-        applicationId "com.Dados-Triples"
+        applicationId "com.mobilegame"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
