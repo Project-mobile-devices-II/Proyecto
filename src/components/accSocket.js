@@ -46,24 +46,80 @@ const AccSocket = () => {
   const wsRef = useRef(null);
   const countdownRef = useRef(null);
   const lastTimerIdRef = useRef(0);
+  const gameStateRef = useRef(gameState);
+  const roomIdRef = useRef(roomId);
+  const selectedDiceRef = useRef(selectedDice);
+  const useRedRef = useRef(useRed);
+  const useBlueRef = useRef(useBlue);
+
+  // mantener refs actualizados
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+  useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
+  useEffect(() => { selectedDiceRef.current = selectedDice; }, [selectedDice]);
+  useEffect(() => { useRedRef.current = useRed; }, [useRed]);
+  useEffect(() => { useBlueRef.current = useBlue; }, [useBlue]);
 
   // ================= COUNTDOWN =================
-  const startCountdown = (seconds = 10) => {
+  const startCountdown = useCallback((seconds = 10) => {
     if (countdownRef.current) clearInterval(countdownRef.current);
     setCountdown(seconds);
     countdownRef.current = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
           clearInterval(countdownRef.current);
+          handleCountdownEnd();
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
-  };
+  }, []);
 
   const stopCountdown = () => {
     if (countdownRef.current) clearInterval(countdownRef.current);
+  };
+
+  const handleCountdownEnd = () => {
+    const state = gameStateRef.current;
+    const myId = myClientIdRef.current;
+    const rid = roomIdRef.current;
+
+    if (!myId || !rid) return;
+    if (state.current_turn !== myId) return;
+
+    if (state.phase === "rolling") {
+      const me = state.players.find(p => p.client_id === myId);
+      if (me && me.white_dice.length === 0) {
+        console.log("⏱️ Auto-roll por timeout");
+        safeSendDirect({ type: "ROLL_DICE", room_id: rid, client_id: myId });
+      }
+    }
+
+    if (state.phase === "presenting") {
+      const me = state.players.find(p => p.client_id === myId);
+      if (me && !me.submitted_combination) {
+        // auto-submit los primeros 3 dados disponibles
+        const available = me.remaining_dice;
+        if (available.length >= 3) {
+          const dice = [available[0], available[1], available[2]];
+          console.log("Auto-submit por timeout:", dice);
+          safeSendDirect({
+            type: "SUBMIT_COMBINATION",
+            dice,
+            use_red: false,
+            use_blue: false,
+            room_id: rid,
+            client_id: myId
+          });
+        }
+      }
+    }
+  };
+
+  // safeSend directo sin closure
+  const safeSendDirect = (data) => {
+    if (!wsRef.current || wsRef.current.readyState !== 1) return;
+    wsRef.current.send(JSON.stringify(data));
   };
 
   // ================= SAFE SEND =================
@@ -110,7 +166,6 @@ const AccSocket = () => {
           const newTimerId = data.timer_id ?? 0;
 
           setGameState(prev => {
-            // ignorar estados viejos
             if (newTimerId < lastTimerIdRef.current) return prev;
             lastTimerIdRef.current = newTimerId;
 
@@ -122,7 +177,7 @@ const AccSocket = () => {
               setUseRed(false);
               setUseBlue(false);
 
-              if (newPhase === "rolling" || newPhase === "presenting") {
+              if ((newPhase === "rolling" || newPhase === "presenting") && newTurn === myClientIdRef.current) {
                 startCountdown(10);
               } else {
                 stopCountdown();
@@ -428,6 +483,8 @@ const AccSocket = () => {
     const me = getMe();
     const phase = gameState.phase;
     const myTurn = isMyTurn();
+    const predictedCount = gameState.players.filter(p => p.prediction_submitted).length;
+    const totalPlayers = gameState.players.length;
 
     return (
       <ScrollView style={style_01.container}>
@@ -457,6 +514,9 @@ const AccSocket = () => {
                       </View>
                     ))}
                   </View>
+                  <Text style={{ color: '#aaa', fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                    🔴 Rojo: oculto • 🔵 Azul: oculto
+                  </Text>
                 </>
               ) : (
                 <>
@@ -490,15 +550,24 @@ const AccSocket = () => {
         {phase === "prediction" && (
           <View>
             <Text style={style_01.sectionLabel}>ELIGE TU PREDICCIÓN</Text>
+            <Text style={{ color: '#aaa', fontSize: 13, marginBottom: 12, textAlign: 'center' }}>
+              {predictedCount}/{totalPlayers} jugadores enviaron predicción
+            </Text>
             {me?.prediction_submitted ? (
               <Text style={style_01.statusTextSuccess}>✅ Predicción enviada: {me.prediction}</Text>
             ) : (
               <View style={style_01.predictionContainer}>
-                {['ZERO', 'MIN', 'MORE', 'MAX'].map(p => (
-                  <TouchableOpacity key={p} onPress={() => submitPrediction(p)}
-                    style={[style_01.predictionButton, style_01[p.toLowerCase()]]}
+                {[
+                  { key: 'ZERO', label: 'ZERO', desc: '0 puntos' },
+                  { key: 'MIN', label: 'MIN', desc: '1-6 pts' },
+                  { key: 'MORE', label: 'MORE', desc: '7-10 pts' },
+                  { key: 'MAX', label: 'MAX', desc: '+10 pts' },
+                ].map(p => (
+                  <TouchableOpacity key={p.key} onPress={() => submitPrediction(p.key)}
+                    style={[style_01.predictionButton, style_01[p.key.toLowerCase()]]}
                   >
-                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>{p}</Text>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{p.label}</Text>
+                    <Text style={{ color: '#ddd', fontSize: 11, marginTop: 2 }}>{p.desc}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
