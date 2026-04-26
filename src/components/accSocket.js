@@ -274,24 +274,26 @@ const AccSocket = () => {
     };
 
     const playMusic = (file, ref) => {
+      // no reiniciar si ya está sonando el mismo archivo
+      if (ref.current) return;
       stopAll();
       const sound = new Sound(file, Sound.MAIN_BUNDLE, (error) => {
         if (error) { console.log('Error cargando música:', error); return; }
         sound.setNumberOfLoops(-1);
         sound.play();
+        ref.current = sound;
       });
-      ref.current = sound;
     };
 
-    if (['loading', 'home', 'nick', 'lobby'].includes(screen)) {
+    if (['home', 'nick', 'lobby'].includes(screen)) {
       playMusic('menu_music.mp3', menuMusicRef);
-    } else if (['game'].includes(screen)) {
+    } else if (screen === 'game') {
       playMusic('game_music.mp3', gameMusicRef);
     } else if (screen === 'game_over') {
       stopAll();
     }
 
-    return () => stopAll();
+    return () => {};
   }, [screen]);
 
   useEffect(() => {
