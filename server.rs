@@ -46,6 +46,7 @@ struct GameState {
     presentation_order: Vec<String>,
     current_presentation: u8,
     current_turn: String,
+    timer_id: u64,
 }
 
 type Clients = Arc<TokioMutex<HashMap<SocketAddr, mpsc::UnboundedSender<String>>>>;
@@ -184,7 +185,6 @@ async fn process_message(
 
     match t {
 
-        // ── TU CAMBIO: sin broadcast_spectators al crear sala ──
         "CREATE_ROOM" => {
             let client_id = data["client_id"].as_str().unwrap_or("");
             let room_id = generate_code();
@@ -205,6 +205,7 @@ async fn process_message(
                 presentation_order: vec![],
                 current_presentation: 0,
                 current_turn: String::new(),
+                timer_id: 0,
             };
 
             room.players.push(Player {
@@ -230,7 +231,6 @@ async fn process_message(
                 "type": "ROOM_CREATED",
                 "room_id": room_id
             })).await;
-            // Sin broadcast_spectators aquí — la sala aparece solo cuando el jugador pone su nick (JOIN)
         }
 
         "JOIN_ROOM" => {
@@ -345,9 +345,7 @@ async fn process_message(
                 let mut rooms_lock = rooms.lock().await;
                 if let Some(room) = rooms_lock.get_mut(&room_id) {
                     if room.phase != "rolling" { return; }
-
-                    let is_turn = room.current_turn == client_id;
-                    if !is_turn { return; }
+                    if room.current_turn != client_id { return; }
 
                     if let Some(p) = room.players.iter_mut().find(|p| p.client_id == client_id) {
                         if p.white_dice.is_empty() {
@@ -359,10 +357,15 @@ async fn process_message(
                         }
                     }
 
-                    let current_idx = room.players.iter().position(|p| p.client_id == client_id).unwrap_or(0);
-                    let next_idx = current_idx + 1;
-                    if next_idx < room.players.len() {
-                        room.current_turn = room.players[next_idx].client_id.clone();
+                    // avanzar al siguiente que no tiró
+                    if let Some(next) = room.players.iter()
+                        .find(|p| p.white_dice.is_empty())
+                        .map(|p| p.client_id.clone())
+                    {
+                        room.current_turn = next;
+                        room.timer_id += 1;
+                    } else {
+                        room.current_turn = String::new();
                     }
 
                     room.players.iter().all(|p| !p.white_dice.is_empty())
@@ -379,7 +382,6 @@ async fn process_message(
             }
         }
 
-        // ── CAMBIO COMPAÑERO: logs + fix presentation_order ──
         "SUBMIT_PREDICTION" => {
             let room_id = data["room_id"].as_str().unwrap_or("").to_string();
             let client_id = data["client_id"].as_str().unwrap_or("");
@@ -393,10 +395,7 @@ async fn process_message(
             let all_predicted = {
                 let mut rooms_lock = rooms.lock().await;
                 if let Some(room) = rooms_lock.get_mut(&room_id) {
-                    if room.phase != "prediction" {
-                        println!("❌ No está en fase prediction");
-                        return;
-                    }
+                    if room.phase != "prediction" { return; }
                     if let Some(p) = room.players.iter_mut().find(|p| p.client_id == client_id) {
                         if !p.prediction_submitted {
                             println!("📩 {} predijo {}", client_id, prediction);
@@ -404,13 +403,8 @@ async fn process_message(
                             p.prediction_submitted = true;
                         }
                     }
-                    let all = room.players.iter().all(|p| p.prediction_submitted);
-                    println!("📊 all_predicted = {}", all);
-                    all
-                } else {
-                    println!("❌ Sala no encontrada");
-                    false
-                }
+                    room.players.iter().all(|p| p.prediction_submitted)
+                } else { false }
             };
 
             if all_predicted {
@@ -419,7 +413,6 @@ async fn process_message(
                 {
                     let mut rooms_lock = rooms.lock().await;
                     if let Some(room) = rooms_lock.get_mut(&room_id) {
-                        // Fix clave: construir presentation_order desde cero
                         room.presentation_order = room.players
                             .iter()
                             .map(|p| p.client_id.clone())
@@ -429,10 +422,8 @@ async fn process_message(
                         if let Some(first) = room.presentation_order.first() {
                             room.current_turn = first.clone();
                             println!("🎯 Primer turno: {}", room.current_turn);
-                        } else {
-                            println!("❌ ERROR: no hay jugadores para turno");
-                            room.current_turn = String::new();
                         }
+                        room.timer_id += 1;
                     }
                 }
 
@@ -441,7 +432,6 @@ async fn process_message(
             }
         }
 
-        // ── CAMBIO COMPAÑERO: logs detallados de validación ──
         "SUBMIT_COMBINATION" => {
             let room_id = data["room_id"].as_str().unwrap_or("").to_string();
             let client_id = data["client_id"].as_str().unwrap_or("");
@@ -456,11 +446,7 @@ async fn process_message(
             let use_red = data["use_red"].as_bool().unwrap_or(false);
             let use_blue = data["use_blue"].as_bool().unwrap_or(false);
 
-            println!("🎲 Dados recibidos: {:?}", dice);
-            println!("🔴 use_red: {}, 🔵 use_blue: {}", use_red, use_blue);
-
             if dice.len() != 3 {
-                println!("❌ ERROR: no son 3 dados");
                 send_to_client(clients, addr, serde_json::json!({
                     "type": "ERROR", "message": "Debes seleccionar exactamente 3 dados"
                 })).await;
@@ -470,22 +456,13 @@ async fn process_message(
             let all_submitted = {
                 let mut rooms_lock = rooms.lock().await;
                 if let Some(room) = rooms_lock.get_mut(&room_id) {
-                    println!("📋 Orden de turno: {:?}", room.presentation_order);
-                    println!("🔄 Turno actual: {}", room.current_turn);
-
-                    if room.phase != "presenting" {
-                        println!("❌ No está en fase presenting");
-                        return;
-                    }
+                    if room.phase != "presenting" { return; }
                     if room.current_turn != client_id {
                         println!("❌ No es turno de {}", client_id);
                         return;
                     }
 
                     if let Some(p) = room.players.iter_mut().find(|p| p.client_id == client_id) {
-                        println!("🎯 Dados disponibles: {:?}", p.remaining_dice);
-                        println!("🔴 Red: {}, 🔵 Blue: {}", p.red_die, p.blue_die);
-
                         if p.submitted_combination.is_none() {
                             let mut temp_remaining = p.remaining_dice.clone();
                             let mut valid = true;
@@ -508,8 +485,6 @@ async fn process_message(
                                 }
                             }
 
-                            println!("✅ Validación: {}", valid);
-
                             if valid {
                                 println!("💾 Guardando combinación para {}", client_id);
                                 p.remaining_dice = temp_remaining;
@@ -521,29 +496,25 @@ async fn process_message(
                         }
                     }
 
-                    let current_idx = room.presentation_order.iter()
-                        .position(|id| id == client_id)
-                        .unwrap_or(0);
-                    let next_idx = current_idx + 1;
-                    if next_idx < room.presentation_order.len() {
-                        room.current_turn = room.presentation_order[next_idx].clone();
-                        println!("➡️ Nuevo turno: {}", room.current_turn);
+                    // 🔥 buscar siguiente jugador que NO haya enviado
+                    let next = room.presentation_order.iter()
+                        .find(|id| {
+                            room.players.iter().any(|p|
+                                &p.client_id == *id && p.submitted_combination.is_none()
+                            )
+                        })
+                        .cloned();
+
+                    if let Some(next_turn) = next {
+                        room.current_turn = next_turn.clone();
+                        room.timer_id += 1;
+                        println!("➡️ Nuevo turno: {}", next_turn);
                     } else {
-                        println!("🏁 Último jugador, no hay siguiente turno");
+                        println!("🏁 Todos enviaron combinación");
                     }
 
-                    println!("📊 Estado jugadores:");
-                    for p in &room.players {
-                        println!("👤 {} -> submitted: {}", p.client_id, p.submitted_combination.is_some());
-                    }
-
-                    let all_done = room.players.iter().all(|p| p.submitted_combination.is_some());
-                    println!("📊 all_submitted = {}", all_done);
-                    all_done
-                } else {
-                    println!("❌ Sala no encontrada");
-                    false
-                }
+                    room.players.iter().all(|p| p.submitted_combination.is_some())
+                } else { false }
             };
 
             broadcast_room(&room_id, clients, rooms).await;
@@ -552,8 +523,6 @@ async fn process_message(
             if all_submitted {
                 println!("🚀 TODOS ENVIARON → evaluando");
                 evaluate_combinations(room_id, clients.clone(), rooms.clone(), spectators.clone()).await;
-            } else {
-                println!("⏳ Esperando a otros jugadores...");
             }
         }
 
@@ -573,6 +542,7 @@ async fn process_message(
                     room.current_presentation = 0;
                     room.current_turn = String::new();
                     room.white_dice.clear();
+                    room.timer_id += 1;
 
                     for p in room.players.iter_mut() {
                         p.score = 0.0;
@@ -650,12 +620,9 @@ async fn process_message(
                                 "round_score": p.round_score,
                                 "ready": p.ready,
                                 "is_owner": i == 0,
-                                "prediction": p.prediction,
                                 "prediction_submitted": p.prediction_submitted,
                                 "white_dice": p.white_dice,
-                                "remaining_dice": p.remaining_dice,
                                 "submitted_combination": p.submitted_combination,
-                                "used_hidden": p.used_hidden,
                             })
                         }).collect::<Vec<_>>()
                     })
@@ -685,6 +652,7 @@ async fn start_round(room_id: String, clients: Clients, rooms: Rooms, spectators
             room.round_scores.clear();
             room.presentation_order.clear();
             room.current_presentation = 0;
+            room.timer_id += 1;
 
             for p in room.players.iter_mut() {
                 p.white_dice = vec![];
@@ -722,11 +690,19 @@ fn start_rolling_timer(room_id: String, clients: Clients, rooms: Rooms, spectato
     let spectators_c = spectators.clone();
 
     tokio::spawn(async move {
+        // guardar timer_id al momento de crear el timer
+        let saved_timer_id = {
+            let rooms_lock = rooms_c.lock().await;
+            rooms_lock.get(&room_id_c).map(|r| r.timer_id).unwrap_or(0)
+        };
+
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
         let next_turn = {
             let mut rooms_lock = rooms_c.lock().await;
             if let Some(room) = rooms_lock.get_mut(&room_id_c) {
+                // cancelar si el timer_id cambió
+                if room.timer_id != saved_timer_id { return; }
                 if room.phase != "rolling" { return; }
 
                 let current_turn = room.current_turn.clone();
@@ -741,13 +717,15 @@ fn start_rolling_timer(room_id: String, clients: Clients, rooms: Rooms, spectato
                     }
                 }
 
-                let current_idx = room.players.iter().position(|p| p.client_id == current_turn).unwrap_or(0);
-                let next_idx = current_idx + 1;
+                // siguiente que no tiró
+                let next = room.players.iter()
+                    .find(|p| p.white_dice.is_empty())
+                    .map(|p| p.client_id.clone());
 
-                if next_idx < room.players.len() {
-                    let next = room.players[next_idx].client_id.clone();
-                    room.current_turn = next.clone();
-                    Some((next, false))
+                if let Some(next_id) = next {
+                    room.current_turn = next_id.clone();
+                    room.timer_id += 1;
+                    Some((next_id, false))
                 } else {
                     room.current_turn = String::new();
                     Some((String::new(), true))
@@ -774,6 +752,7 @@ async fn set_phase(room_id: String, phase: String, clients: Clients, rooms: Room
         let mut rooms_lock = rooms.lock().await;
         if let Some(room) = rooms_lock.get_mut(&room_id) {
             room.phase = phase;
+            room.timer_id += 1;
         }
     }
     broadcast_room(&room_id, &clients, &rooms).await;
@@ -787,31 +766,51 @@ fn start_presentation_timer(room_id: String, clients: Clients, rooms: Rooms, spe
     let spectators_c = spectators.clone();
 
     tokio::spawn(async move {
+        // guardar timer_id al momento de crear el timer
+        let saved_timer_id = {
+            let rooms_lock = rooms_c.lock().await;
+            rooms_lock.get(&room_id_c).map(|r| r.timer_id).unwrap_or(0)
+        };
+
         tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
 
         let needs_eval = {
             let mut rooms_lock = rooms_c.lock().await;
             if let Some(room) = rooms_lock.get_mut(&room_id_c) {
-                if room.phase == "presenting" {
-                    let current_turn = room.current_turn.clone();
+                // cancelar si el timer_id cambió
+                if room.timer_id != saved_timer_id { return; }
+                if room.phase != "presenting" { return; }
 
-                    if let Some(p) = room.players.iter_mut().find(|p| p.client_id == current_turn && p.submitted_combination.is_none()) {
-                        if p.remaining_dice.len() >= 3 {
-                            let combo = vec![p.remaining_dice[0], p.remaining_dice[1], p.remaining_dice[2]];
-                            let temp: Vec<u8> = p.remaining_dice[3..].to_vec();
-                            p.remaining_dice = temp;
-                            p.submitted_combination = Some(combo);
-                        }
+                let current_turn = room.current_turn.clone();
+
+                // auto-submit para el jugador en turno
+                if let Some(p) = room.players.iter_mut()
+                    .find(|p| p.client_id == current_turn && p.submitted_combination.is_none())
+                {
+                    if p.remaining_dice.len() >= 3 {
+                        let combo = vec![p.remaining_dice[0], p.remaining_dice[1], p.remaining_dice[2]];
+                        p.remaining_dice = p.remaining_dice[3..].to_vec();
+                        p.submitted_combination = Some(combo);
+                        println!("⏱️ Auto-submit para {}", current_turn);
                     }
+                }
 
-                    let current_idx = room.presentation_order.iter().position(|id| id == &current_turn).unwrap_or(0);
-                    let next_idx = current_idx + 1;
-                    if next_idx < room.presentation_order.len() {
-                        room.current_turn = room.presentation_order[next_idx].clone();
-                    }
+                // 🔥 buscar siguiente jugador que NO haya enviado
+                let next = room.presentation_order.iter()
+                    .find(|id| {
+                        room.players.iter().any(|p|
+                            &p.client_id == *id && p.submitted_combination.is_none()
+                        )
+                    })
+                    .cloned();
 
-                    room.players.iter().all(|p| p.submitted_combination.is_some())
-                } else { false }
+                if let Some(next_turn) = next {
+                    room.current_turn = next_turn.clone();
+                    room.timer_id += 1;
+                    println!("➡️ Timer avanza turno a: {}", next_turn);
+                }
+
+                room.players.iter().all(|p| p.submitted_combination.is_some())
             } else { false }
         };
 
@@ -821,9 +820,11 @@ fn start_presentation_timer(room_id: String, clients: Clients, rooms: Rooms, spe
         if needs_eval {
             evaluate_combinations(room_id_c, clients_c, rooms_c, spectators_c).await;
         } else {
-            let phase = {
+            let (phase, timer_id) = {
                 let rooms_lock = rooms_c.lock().await;
-                rooms_lock.get(&room_id_c).map(|r| r.phase.clone()).unwrap_or_default()
+                rooms_lock.get(&room_id_c)
+                    .map(|r| (r.phase.clone(), r.timer_id))
+                    .unwrap_or_default()
             };
             if phase == "presenting" {
                 start_presentation_timer(room_id_c, clients_c, rooms_c, spectators_c);
@@ -908,6 +909,7 @@ async fn evaluate_combinations(room_id: String, clients: Clients, rooms: Rooms, 
             if !room.presentation_order.is_empty() {
                 room.current_turn = room.presentation_order[0].clone();
             }
+            room.timer_id += 1;
 
             for p in room.players.iter_mut() { p.submitted_combination = None; }
 
@@ -960,6 +962,7 @@ async fn end_round(room_id: String, clients: Clients, rooms: Rooms, spectators: 
             }
             room.round += 1;
             room.phase = "round_end".to_string();
+            room.timer_id += 1;
         }
     }
 
@@ -1051,9 +1054,7 @@ async fn broadcast_room(room_id: &str, clients: &Clients, rooms: &Rooms) {
     if let Some(room) = rooms_guard.get(room_id) {
         let state = serde_json::to_string(room).unwrap();
         let clients_guard = clients.lock().await;
-        println!("📡 Broadcast sala {}", room_id);
         for p in &room.players {
-            println!("➡️ {}", p.addr);
             if let Some(tx) = clients_guard.get(&p.addr) {
                 let _ = tx.send(state.clone());
             }
@@ -1061,7 +1062,6 @@ async fn broadcast_room(room_id: &str, clients: &Clients, rooms: &Rooms) {
     }
 }
 
-// ── TUS CAMBIOS: filtro Anon + payload enriquecido ──
 async fn broadcast_spectators(rooms: &Rooms, clients: &Clients, spectators: &Spectators) {
     let rooms_lock = rooms.lock().await;
 
@@ -1084,12 +1084,9 @@ async fn broadcast_spectators(rooms: &Rooms, clients: &Clients, spectators: &Spe
                         "round_score": p.round_score,
                         "ready": p.ready,
                         "is_owner": i == 0,
-                        "prediction": p.prediction,
                         "prediction_submitted": p.prediction_submitted,
                         "white_dice": p.white_dice,
-                        "remaining_dice": p.remaining_dice,
                         "submitted_combination": p.submitted_combination,
-                        "used_hidden": p.used_hidden,
                     })
                 }).collect::<Vec<_>>()
             })
