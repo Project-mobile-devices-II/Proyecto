@@ -47,7 +47,7 @@ Usar el comando dentro de la ruta actual del main.rs
 
 NOTA: Si al hacer "cargo run" sale algo como “port 5000 already in use”, usen este comando para ver qué procesos están usando puertos en el sistema:
 	
-	sudo ss -plnty
+	sudo ss -plnt
 
 Deben buscar en las listas de procesos uno que tenga dichas caracteristicas:
 	- puerto: 5000
