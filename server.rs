@@ -560,20 +560,29 @@ async fn process_message(
                 None,
             ).await;
 
-            let is_owner;
+            let should_delete;
             {
                 let mut rooms_lock = rooms.lock().await;
                 if let Some(room) = rooms_lock.get_mut(&room_id) {
-                    is_owner = room.players.first().map(|p| p.client_id == client_id).unwrap_or(false);
-                    if is_owner {
+                    let is_owner = room.players.first().map(|p| p.client_id == client_id).unwrap_or(false);
+                    
+                    // quitar al jugador de la sala
+                    room.players.retain(|p| p.client_id != client_id);
+
+                    if room.players.is_empty() {
+                        // no hay nadie más — eliminar sala
                         rooms_lock.remove(&room_id);
+                        should_delete = true;
                     } else {
-                        room.players.retain(|p| p.client_id != client_id);
+                        if is_owner {
+                            println!("👑 Nuevo owner: {}", room.players[0].nick);
+                        }
+                        should_delete = false;
                     }
                 } else { return; }
             }
 
-            if is_owner {
+            if should_delete {
                 let _ = rooms_coll.delete_one(doc! { "room_id": &room_id }, None).await;
             } else {
                 broadcast_room(&room_id, clients, rooms).await;
@@ -801,11 +810,9 @@ fn start_presentation_timer(room_id: String, clients: Clients, rooms: Rooms, spe
         if needs_eval {
             evaluate_combinations(room_id_c, clients_c, rooms_c, spectators_c).await;
         } else {
-            let (phase, timer_id) = {
+            let phase = {
                 let rooms_lock = rooms_c.lock().await;
-                rooms_lock.get(&room_id_c)
-                    .map(|r| (r.phase.clone(), r.timer_id))
-                    .unwrap_or_default()
+                rooms_lock.get(&room_id_c).map(|r| r.phase.clone()).unwrap_or_default()
             };
             if phase == "presenting" {
                 start_presentation_timer(room_id_c, clients_c, rooms_c, spectators_c);
@@ -1122,4 +1129,4 @@ async fn send_ws_text(writer: &mut OwnedWriteHalf, message: &str) -> Result<(), 
     frame.extend_from_slice(payload);
     writer.write_all(&frame).await?;
     Ok(())
-}
+}   
