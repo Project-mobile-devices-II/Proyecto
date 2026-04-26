@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback, memo } from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, Alert, ActivityIndicator, AppState, BackHandler, Modal } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Sound from 'react-native-sound';
+Sound.setCategory('Playback');
 import { style_01 } from '../styles/style_01';
 import { createWs } from '../../App';
 
@@ -64,6 +66,8 @@ const TurnDisplay = memo(({ myTurn, nickTurn }) => (
 
 const AccSocket = () => {
 
+  const menuMusicRef = useRef(null);
+  const gameMusicRef = useRef(null);
   const [screen, setScreen] = useState("loading");
   const [isConnecting, setIsConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -254,6 +258,41 @@ const AccSocket = () => {
   };
 
   useEffect(() => { connectWs(); return () => stopCountdown(); }, []);
+
+  useEffect(() => {
+    const stopAll = () => {
+      if (menuMusicRef.current) {
+        menuMusicRef.current.stop();
+        menuMusicRef.current.release();
+        menuMusicRef.current = null;
+      }
+      if (gameMusicRef.current) {
+        gameMusicRef.current.stop();
+        gameMusicRef.current.release();
+        gameMusicRef.current = null;
+      }
+    };
+
+    const playMusic = (file, ref) => {
+      stopAll();
+      const sound = new Sound(file, Sound.MAIN_BUNDLE, (error) => {
+        if (error) { console.log('Error cargando música:', error); return; }
+        sound.setNumberOfLoops(-1);
+        sound.play();
+      });
+      ref.current = sound;
+    };
+
+    if (['loading', 'home', 'nick', 'lobby'].includes(screen)) {
+      playMusic('menu_music.mp3', menuMusicRef);
+    } else if (['game'].includes(screen)) {
+      playMusic('game_music.mp3', gameMusicRef);
+    } else if (screen === 'game_over') {
+      stopAll();
+    }
+
+    return () => stopAll();
+  }, [screen]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
