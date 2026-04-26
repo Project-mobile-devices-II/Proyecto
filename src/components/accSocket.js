@@ -23,7 +23,6 @@ const AccSocket = () => {
   const [screen, setScreen] = useState("loading");
   const [isConnecting, setIsConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
   const [roomId, setRoomId] = useState('');
   const [inputRoom, setInputRoom] = useState('');
   const [nick, setNick] = useState('');
@@ -35,6 +34,7 @@ const AccSocket = () => {
     current_presentation: 0,
     round_scores: {},
     current_turn: '',
+    timer_id: 0,
   });
   const [countdown, setCountdown] = useState(10);
   const [showRules, setShowRules] = useState(false);
@@ -45,9 +45,10 @@ const AccSocket = () => {
   const myClientIdRef = useRef(null);
   const wsRef = useRef(null);
   const countdownRef = useRef(null);
+  const lastTimerIdRef = useRef(0);
 
   // ================= COUNTDOWN =================
-  const startCountdown = (seconds = 20) => {
+  const startCountdown = (seconds = 10) => {
     if (countdownRef.current) clearInterval(countdownRef.current);
     setCountdown(seconds);
     countdownRef.current = setInterval(() => {
@@ -106,9 +107,13 @@ const AccSocket = () => {
         if (data.players) {
           const newPhase = data.phase;
           const newTurn = data.current_turn;
+          const newTimerId = data.timer_id ?? 0;
 
-          // ── FIX COUNTDOWN: solo reiniciar si cambia la fase o el turno ──
           setGameState(prev => {
+            // ignorar estados viejos
+            if (newTimerId < lastTimerIdRef.current) return prev;
+            lastTimerIdRef.current = newTimerId;
+
             const phaseChanged = prev.phase !== newPhase;
             const turnChanged = prev.current_turn !== newTurn;
 
@@ -118,7 +123,7 @@ const AccSocket = () => {
               setUseBlue(false);
 
               if (newPhase === "rolling" || newPhase === "presenting") {
-                startCountdown(20);
+                startCountdown(10);
               } else {
                 stopCountdown();
               }
@@ -172,7 +177,8 @@ const AccSocket = () => {
         setSelectedDice([]);
         setUseRed(false);
         setUseBlue(false);
-        setGameState({ phase: 'lobby', players: [], round: 1, presentation_order: [], current_presentation: 0, round_scores: {}, current_turn: '' });
+        lastTimerIdRef.current = 0;
+        setGameState({ phase: 'lobby', players: [], round: 1, presentation_order: [], current_presentation: 0, round_scores: {}, current_turn: '', timer_id: 0 });
       }
     });
     return () => sub.remove();
@@ -187,7 +193,8 @@ const AccSocket = () => {
         onPress: () => {
           safeSend({ type: "LEAVE_ROOM", room_id: roomId, client_id: myClientIdRef.current });
           setRoomId(''); setNick(''); setSelectedDice([]); setUseRed(false); setUseBlue(false);
-          setGameState({ phase: 'lobby', players: [], round: 1, presentation_order: [], current_presentation: 0, round_scores: {}, current_turn: '' });
+          lastTimerIdRef.current = 0;
+          setGameState({ phase: 'lobby', players: [], round: 1, presentation_order: [], current_presentation: 0, round_scores: {}, current_turn: '', timer_id: 0 });
           setScreen("home");
         }
       }
@@ -515,7 +522,6 @@ const AccSocket = () => {
                     Seleccionados: {totalSelected()}/3
                   </Text>
 
-                  {/* DADOS BLANCOS */}
                   <Text style={style_01.sectionLabel}>DADOS BLANCOS</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 }}>
                     {me?.remaining_dice?.map((d, i) => {
@@ -538,7 +544,6 @@ const AccSocket = () => {
                     })}
                   </View>
 
-                  {/* DADOS OCULTOS */}
                   <Text style={style_01.sectionLabel}>DADOS OCULTOS</Text>
                   <View style={{ flexDirection: 'row', marginBottom: 16 }}>
                     <TouchableOpacity
@@ -596,7 +601,6 @@ const AccSocket = () => {
               </View>
             )}
 
-            {/* combinaciones ya enviadas (visibles para todos) */}
             <Text style={[style_01.sectionLabel, { marginTop: 16 }]}>COMBINACIONES ENVIADAS</Text>
             {gameState.players.map((p, i) => p.submitted_combination && (
               <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
@@ -624,7 +628,6 @@ const AccSocket = () => {
           </View>
         )}
 
-        {/* PUNTAJES */}
         <Text style={[style_01.sectionLabel, { marginTop: 20 }]}>PUNTAJES</Text>
         {gameState.players.map((p, i) => (
           <View key={i} style={style_01.playerCard}>
