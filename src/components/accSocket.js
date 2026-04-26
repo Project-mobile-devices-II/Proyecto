@@ -23,7 +23,6 @@ const AccSocket = () => {
   const [screen, setScreen] = useState("loading");
   const [isConnecting, setIsConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
   const [roomId, setRoomId] = useState('');
   const [inputRoom, setInputRoom] = useState('');
   const [nick, setNick] = useState('');
@@ -35,6 +34,7 @@ const AccSocket = () => {
     current_presentation: 0,
     round_scores: {},
     current_turn: '',
+    timer_id: 0,
   });
   const [countdown, setCountdown] = useState(10);
   const [showRules, setShowRules] = useState(false);
@@ -45,24 +45,81 @@ const AccSocket = () => {
   const myClientIdRef = useRef(null);
   const wsRef = useRef(null);
   const countdownRef = useRef(null);
+  const lastTimerIdRef = useRef(0);
+  const gameStateRef = useRef(gameState);
+  const roomIdRef = useRef(roomId);
+  const selectedDiceRef = useRef(selectedDice);
+  const useRedRef = useRef(useRed);
+  const useBlueRef = useRef(useBlue);
+
+  // mantener refs actualizados
+  useEffect(() => { gameStateRef.current = gameState; }, [gameState]);
+  useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
+  useEffect(() => { selectedDiceRef.current = selectedDice; }, [selectedDice]);
+  useEffect(() => { useRedRef.current = useRed; }, [useRed]);
+  useEffect(() => { useBlueRef.current = useBlue; }, [useBlue]);
 
   // ================= COUNTDOWN =================
-  const startCountdown = (seconds = 20) => {
+  const startCountdown = useCallback((seconds = 10) => {
     if (countdownRef.current) clearInterval(countdownRef.current);
     setCountdown(seconds);
     countdownRef.current = setInterval(() => {
       setCountdown(prev => {
         if (prev <= 1) {
           clearInterval(countdownRef.current);
+          handleCountdownEnd();
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
-  };
+  }, []);
 
   const stopCountdown = () => {
     if (countdownRef.current) clearInterval(countdownRef.current);
+  };
+
+  const handleCountdownEnd = () => {
+    const state = gameStateRef.current;
+    const myId = myClientIdRef.current;
+    const rid = roomIdRef.current;
+
+    if (!myId || !rid) return;
+    if (state.current_turn !== myId) return;
+
+    if (state.phase === "rolling") {
+      const me = state.players.find(p => p.client_id === myId);
+      if (me && me.white_dice.length === 0) {
+        console.log("⏱️ Auto-roll por timeout");
+        safeSendDirect({ type: "ROLL_DICE", room_id: rid, client_id: myId });
+      }
+    }
+
+    if (state.phase === "presenting") {
+      const me = state.players.find(p => p.client_id === myId);
+      if (me && !me.submitted_combination) {
+        // auto-submit los primeros 3 dados disponibles
+        const available = me.remaining_dice;
+        if (available.length >= 3) {
+          const dice = [available[0], available[1], available[2]];
+          console.log("Auto-submit por timeout:", dice);
+          safeSendDirect({
+            type: "SUBMIT_COMBINATION",
+            dice,
+            use_red: false,
+            use_blue: false,
+            room_id: rid,
+            client_id: myId
+          });
+        }
+      }
+    }
+  };
+
+  // safeSend directo sin closure
+  const safeSendDirect = (data) => {
+    if (!wsRef.current || wsRef.current.readyState !== 1) return;
+    wsRef.current.send(JSON.stringify(data));
   };
 
   // ================= SAFE SEND =================
@@ -106,9 +163,12 @@ const AccSocket = () => {
         if (data.players) {
           const newPhase = data.phase;
           const newTurn = data.current_turn;
+          const newTimerId = data.timer_id ?? 0;
 
-          // ── FIX COUNTDOWN: solo reiniciar si cambia la fase o el turno ──
           setGameState(prev => {
+            if (newTimerId < lastTimerIdRef.current) return prev;
+            lastTimerIdRef.current = newTimerId;
+
             const phaseChanged = prev.phase !== newPhase;
             const turnChanged = prev.current_turn !== newTurn;
 
@@ -117,8 +177,8 @@ const AccSocket = () => {
               setUseRed(false);
               setUseBlue(false);
 
-              if (newPhase === "rolling" || newPhase === "presenting") {
-                startCountdown(20);
+              if ((newPhase === "rolling" || newPhase === "presenting") && newTurn === myClientIdRef.current) {
+                startCountdown(10);
               } else {
                 stopCountdown();
               }
@@ -172,7 +232,8 @@ const AccSocket = () => {
         setSelectedDice([]);
         setUseRed(false);
         setUseBlue(false);
-        setGameState({ phase: 'lobby', players: [], round: 1, presentation_order: [], current_presentation: 0, round_scores: {}, current_turn: '' });
+        lastTimerIdRef.current = 0;
+        setGameState({ phase: 'lobby', players: [], round: 1, presentation_order: [], current_presentation: 0, round_scores: {}, current_turn: '', timer_id: 0 });
       }
     });
     return () => sub.remove();
@@ -187,7 +248,8 @@ const AccSocket = () => {
         onPress: () => {
           safeSend({ type: "LEAVE_ROOM", room_id: roomId, client_id: myClientIdRef.current });
           setRoomId(''); setNick(''); setSelectedDice([]); setUseRed(false); setUseBlue(false);
-          setGameState({ phase: 'lobby', players: [], round: 1, presentation_order: [], current_presentation: 0, round_scores: {}, current_turn: '' });
+          lastTimerIdRef.current = 0;
+          setGameState({ phase: 'lobby', players: [], round: 1, presentation_order: [], current_presentation: 0, round_scores: {}, current_turn: '', timer_id: 0 });
           setScreen("home");
         }
       }
@@ -421,6 +483,8 @@ const AccSocket = () => {
     const me = getMe();
     const phase = gameState.phase;
     const myTurn = isMyTurn();
+    const predictedCount = gameState.players.filter(p => p.prediction_submitted).length;
+    const totalPlayers = gameState.players.length;
 
     return (
       <ScrollView style={style_01.container}>
@@ -450,6 +514,9 @@ const AccSocket = () => {
                       </View>
                     ))}
                   </View>
+                  <Text style={{ color: '#aaa', fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                    🔴 Rojo: oculto • 🔵 Azul: oculto
+                  </Text>
                 </>
               ) : (
                 <>
@@ -483,15 +550,24 @@ const AccSocket = () => {
         {phase === "prediction" && (
           <View>
             <Text style={style_01.sectionLabel}>ELIGE TU PREDICCIÓN</Text>
+            <Text style={{ color: '#aaa', fontSize: 13, marginBottom: 12, textAlign: 'center' }}>
+              {predictedCount}/{totalPlayers} jugadores enviaron predicción
+            </Text>
             {me?.prediction_submitted ? (
               <Text style={style_01.statusTextSuccess}>✅ Predicción enviada: {me.prediction}</Text>
             ) : (
               <View style={style_01.predictionContainer}>
-                {['ZERO', 'MIN', 'MORE', 'MAX'].map(p => (
-                  <TouchableOpacity key={p} onPress={() => submitPrediction(p)}
-                    style={[style_01.predictionButton, style_01[p.toLowerCase()]]}
+                {[
+                  { key: 'ZERO', label: 'ZERO', desc: '0 puntos' },
+                  { key: 'MIN', label: 'MIN', desc: '1-6 pts' },
+                  { key: 'MORE', label: 'MORE', desc: '7-10 pts' },
+                  { key: 'MAX', label: 'MAX', desc: '+10 pts' },
+                ].map(p => (
+                  <TouchableOpacity key={p.key} onPress={() => submitPrediction(p.key)}
+                    style={[style_01.predictionButton, style_01[p.key.toLowerCase()]]}
                   >
-                    <Text style={{ color: '#fff', fontWeight: 'bold' }}>{p}</Text>
+                    <Text style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}>{p.label}</Text>
+                    <Text style={{ color: '#ddd', fontSize: 11, marginTop: 2 }}>{p.desc}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
@@ -515,7 +591,6 @@ const AccSocket = () => {
                     Seleccionados: {totalSelected()}/3
                   </Text>
 
-                  {/* DADOS BLANCOS */}
                   <Text style={style_01.sectionLabel}>DADOS BLANCOS</Text>
                   <View style={{ flexDirection: 'row', flexWrap: 'wrap', marginBottom: 12 }}>
                     {me?.remaining_dice?.map((d, i) => {
@@ -538,7 +613,6 @@ const AccSocket = () => {
                     })}
                   </View>
 
-                  {/* DADOS OCULTOS */}
                   <Text style={style_01.sectionLabel}>DADOS OCULTOS</Text>
                   <View style={{ flexDirection: 'row', marginBottom: 16 }}>
                     <TouchableOpacity
@@ -596,7 +670,6 @@ const AccSocket = () => {
               </View>
             )}
 
-            {/* combinaciones ya enviadas (visibles para todos) */}
             <Text style={[style_01.sectionLabel, { marginTop: 16 }]}>COMBINACIONES ENVIADAS</Text>
             {gameState.players.map((p, i) => p.submitted_combination && (
               <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
@@ -624,7 +697,6 @@ const AccSocket = () => {
           </View>
         )}
 
-        {/* PUNTAJES */}
         <Text style={[style_01.sectionLabel, { marginTop: 20 }]}>PUNTAJES</Text>
         {gameState.players.map((p, i) => (
           <View key={i} style={style_01.playerCard}>
