@@ -69,6 +69,7 @@ const AccSocket = () => {
   const menuMusicRef = useRef(null);
   const gameMusicRef = useRef(null);
   const currentTrackRef = useRef(null);
+  const appState = useRef(AppState.currentState);
   const [screen, setScreen] = useState("loading");
   const [isConnecting, setIsConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -324,6 +325,45 @@ const AccSocket = () => {
   }, [screen]);
 
   // End of sound management
+
+  // Background soundtrack management
+
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState) => {
+      //When going bg
+      console.log("nextAppState (before): ",nextAppState);
+      console.log("AppState (before): ",appState);
+      if (appState.current === "active" && nextAppState.match(/inactive|background/)){
+
+        console.log("nextAppState (after): ",nextAppState)
+        if (menuMusicRef.current){
+          menuMusicRef.current.pause();
+        }
+        if (gameMusicRef.current){
+          gameMusicRef.current.pause();
+        }
+      }
+
+    //When going back fg
+    if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+      if (menuMusicRef.current) {
+        menuMusicRef.current.play();
+      }
+      if (gameMusicRef.current) {
+        gameMusicRef.current.play();
+      }
+    }
+      appState.current = nextAppState;
+    };
+
+    const subscription = AppState.addEventListener("change", handleAppStateChange);
+
+    return () => {
+      subscription.remove();
+    }
+  }, []);
+
+  // End of background soundtrack management
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
