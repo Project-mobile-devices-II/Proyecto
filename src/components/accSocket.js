@@ -68,6 +68,7 @@ const AccSocket = () => {
 
   const menuMusicRef = useRef(null);
   const gameMusicRef = useRef(null);
+  const currentTrackRef = useRef(null);
   const [screen, setScreen] = useState("loading");
   const [isConnecting, setIsConnecting] = useState(false);
   const [connected, setConnected] = useState(false);
@@ -259,40 +260,70 @@ const AccSocket = () => {
 
   useEffect(() => { connectWs(); return () => stopCountdown(); }, []);
 
-  useEffect(() => {
-    const stopAll = () => {
-      if (menuMusicRef.current) {
-        menuMusicRef.current.stop();
-        menuMusicRef.current.release();
-        menuMusicRef.current = null;
-      }
-      if (gameMusicRef.current) {
-        gameMusicRef.current.stop();
-        gameMusicRef.current.release();
-        gameMusicRef.current = null;
-      }
-    };
 
-    const playMusic = (file, ref) => {
-      stopAll();
-      const sound = new Sound(file, Sound.MAIN_BUNDLE, (error) => {
-        if (error) { console.log('Error cargando música:', error); return; }
-        sound.setNumberOfLoops(-1);
-        sound.play();
-      });
-      ref.current = sound;
-    };
+  // Soundtracks management for the game
 
-    if (['loading', 'home', 'nick', 'lobby'].includes(screen)) {
-      playMusic('menu_music.mp3', menuMusicRef);
-    } else if (['game'].includes(screen)) {
-      playMusic('game_music.mp3', gameMusicRef);
-    } else if (screen === 'game_over') {
+  const screenMusicMap = {
+    loading: 'menu_music.mp3',
+    home: 'menu_music.mp3',
+    nick: 'menu_music.mp3',
+    lobby: 'menu_music.mp3',
+    game: 'game_music.mp3',
+  };
+
+  const stopAll = () => {
+    if (menuMusicRef.current) {
+      menuMusicRef.current.stop();
+      menuMusicRef.current.release();
+      menuMusicRef.current = null;
+    }
+    if (gameMusicRef.current) {
+      gameMusicRef.current.stop();
+      gameMusicRef.current.release();
+      gameMusicRef.current = null;
+    }
+    currentTrackRef.current = null;
+  };
+
+  const playMusic = (file) => {
+    //Checks if current music equals music to play
+    if (currentTrackRef.current === file) {
+      return;
+    }
+
+    // In case of overlapping, stops everything first
+    stopAll();
+
+    const sound = new Sound (file, Sound.MAIN_BUNDLE, (error) => {
+      if (error){
+        console.log("ERROR: Cannot play music -> ", error);
+        return;
+      }
+      // Plays music indefinetly so people can get tired of balatro and minecraft
+      sound.setNumberOfLoops(-1);
+      sound.play();
+    });
+
+    if (file === "menu_music.mp3"){
+      menuMusicRef.current = sound;
+    }else if (file === "game_music.mp3"){
+      gameMusicRef.current = sound;
+    }
+    currentTrackRef.current = file;
+
+  };
+
+  useEffect (() => {
+    const track = screenMusicMap[screen]
+    if (track){
+      playMusic(track);
+    }else{
       stopAll();
     }
 
-    return () => stopAll();
   }, [screen]);
+
+  // End of sound management
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
